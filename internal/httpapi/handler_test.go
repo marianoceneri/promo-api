@@ -50,3 +50,51 @@ func TestPromotionContractFlow(t *testing.T) {
 		t.Fatal("validity check did not emit its contractual event")
 	}
 }
+
+func TestPromotionInstallmentsContractBoundaries(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{name: "minimum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}", want: http.StatusCreated},
+		{name: "below_minimum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-below_minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":0,\"discount_percent\":1,\"enabled\":true}", want: http.StatusBadRequest},
+		{name: "maximum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":48,\"discount_percent\":1,\"enabled\":true}", want: http.StatusCreated},
+		{name: "above_maximum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-above_maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":49,\"discount_percent\":1,\"enabled\":true}", want: http.StatusBadRequest},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(store.NewPromotionStore())
+			request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte(test.body)))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status = %d, want %d, body = %s", response.Code, test.want, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestPromotionDiscountPercentContractBoundaries(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{name: "minimum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":0,\"enabled\":true}", want: http.StatusCreated},
+		{name: "below_minimum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-below_minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":-1,\"enabled\":true}", want: http.StatusBadRequest},
+		{name: "maximum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":100,\"enabled\":true}", want: http.StatusCreated},
+		{name: "above_maximum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-above_maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":101,\"enabled\":true}", want: http.StatusBadRequest},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(store.NewPromotionStore())
+			request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte(test.body)))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status = %d, want %d, body = %s", response.Code, test.want, response.Body.String())
+			}
+		})
+	}
+}

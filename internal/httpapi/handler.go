@@ -145,8 +145,8 @@ func validatePromotion(value domain.Promotion) error {
 	if value.Installments < 1 {
 		return fmt.Errorf("installments must be at least 1")
 	}
-	if value.Installments > 60 {
-		return fmt.Errorf("installments must be at most 60")
+	if value.Installments > 48 {
+		return fmt.Errorf("installments must be at most 48")
 	}
 	if value.DiscountPercent < 0 {
 		return fmt.Errorf("discount_percent must be at least 0")

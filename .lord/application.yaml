@@ -32,7 +32,7 @@ entities:
         required: true
         immutable: false
         minimum: 1
-        maximum: 60
+        maximum: 48
       - name: discount_percent
         type: integer
         required: true
