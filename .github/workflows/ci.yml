@@ -31,22 +31,10 @@ jobs:
       - name: Run tests
         run: go test -race ./...
 
-      - name: Check out LORD authority
-        uses: actions/checkout@v7
-        with:
-          repository: marianoceneri/lord
-          path: .ci/lord
-
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: .ci/lord/package-lock.json
-
-      - name: Build LORD
-        working-directory: .ci/lord
-        run: npm ci && npm run build
 
       - name: Verify contracts, approvals and generated sources
-        run: node .ci/lord/dist/cli.js check --project "$GITHUB_WORKSPACE" --json
+        run: node .lord/tooling/lord-check.cjs check --project "$GITHUB_WORKSPACE" --json
