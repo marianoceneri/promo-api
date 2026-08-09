@@ -6,6 +6,7 @@ target:
   port: 8080
 entities:
   - name: Promotion
+    title: promoción
     plural: promotions
     id_field: id
     storage: memory
@@ -44,35 +45,50 @@ entities:
         immutable: false
 operations:
   - id: CreatePromotion
+    title: Crear promoción
     kind: create
     entity: Promotion
     method: POST
     path: /v1/promotions
     emits: PromocionCreada
+    parameters: []
   - id: UpdatePromotion
+    title: Modificar promoción
     kind: update
     entity: Promotion
     method: PUT
     path: /v1/promotions/{id}
     emits: PromocionActualizada
+    parameters: []
   - id: GetPromotion
+    title: Consultar promoción
     kind: get
     entity: Promotion
     method: GET
     path: /v1/promotions/{id}
     emits: PromocionConsultada
+    parameters: []
   - id: ListPromotions
+    title: Listar promociones
     kind: list
     entity: Promotion
     method: GET
     path: /v1/promotions
     emits: CatalogoConsultado
+    parameters: []
   - id: CheckPromotionValidity
+    title: Consultar vigencia
     kind: evaluate_validity
     entity: Promotion
     method: GET
     path: /v1/promotions/{id}/validity
     emits: VigenciaConsultada
+    parameters:
+      - name: at
+        in: query
+        type: datetime
+        required: true
+        description: Instante para el cual se evalúa la vigencia, en formato RFC3339.
 policies:
   - id: PromotionValidity
     kind: active_between
@@ -84,12 +100,14 @@ policies:
     exclusive_end: true
 flows:
   - name: CatalogManagement
+    title: Gestión de catálogo
     purpose: Crear y modificar promociones administradas.
     operations:
       - CreatePromotion
       - UpdatePromotion
   - name: AuthorizationSupport
-    purpose: Informar vigencia, cuotas y descuento al equipo autorizador.
+    title: Soporte a autorizaciones
+    purpose: Informar vigencia, cuotas y descuento para asistir al equipo autorizador.
     operations:
       - GetPromotion
       - ListPromotions

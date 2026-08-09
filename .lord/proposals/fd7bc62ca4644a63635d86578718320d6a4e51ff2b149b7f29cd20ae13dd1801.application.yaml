@@ -1,0 +1,141 @@
+version: "0.2"
+kind: application_contract
+status: proposal
+proposal_id: sha256:fd7bc62ca4644a63635d86578718320d6a4e51ff2b149b7f29cd20ae13dd1801
+source_contract_id: sha256:b919fddbab62dcef348b07936383e346e985619c054aa0a83c1c72c675b678a2
+proposed_contract_id: sha256:28b4c61f85dd196f36aa5d25df9287b3b1a00bb81b24b03f5fc8e8f7d4999e31
+proposed_by: marianoceneri
+rationale: Declarar el instante de evaluación y los nombres de presentación que la prueba conversacional identificó como faltantes.
+created_at: 2026-08-09T22:34:42.296Z
+impact:
+  entities_added: []
+  entities_removed: []
+  entities_modified:
+    - Promotion
+  operations_added: []
+  operations_removed: []
+  operations_modified:
+    - CheckPromotionValidity
+    - CreatePromotion
+    - GetPromotion
+    - ListPromotions
+    - UpdatePromotion
+  policies_added: []
+  policies_removed: []
+  flows_added: []
+  flows_removed: []
+contract:
+  version: "0.2"
+  name: promo-api
+  target:
+    kind: go-rest
+    module: github.com/marianoceneri/promo-api
+    port: 8080
+  entities:
+    - name: Promotion
+      title: promoción
+      plural: promotions
+      id_field: id
+      storage: memory
+      fields:
+        - name: id
+          type: string
+          required: true
+          immutable: true
+        - name: name
+          type: string
+          required: true
+          immutable: false
+        - name: starts_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: ends_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: installments
+          type: integer
+          required: true
+          immutable: false
+          minimum: 1
+          maximum: 60
+        - name: discount_percent
+          type: integer
+          required: true
+          immutable: false
+          minimum: 0
+          maximum: 100
+        - name: enabled
+          type: boolean
+          required: true
+          immutable: false
+  operations:
+    - id: CreatePromotion
+      title: Crear promoción
+      kind: create
+      entity: Promotion
+      method: POST
+      path: /v1/promotions
+      emits: PromocionCreada
+      parameters: []
+    - id: UpdatePromotion
+      title: Modificar promoción
+      kind: update
+      entity: Promotion
+      method: PUT
+      path: /v1/promotions/{id}
+      emits: PromocionActualizada
+      parameters: []
+    - id: GetPromotion
+      title: Consultar promoción
+      kind: get
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}
+      emits: PromocionConsultada
+      parameters: []
+    - id: ListPromotions
+      title: Listar promociones
+      kind: list
+      entity: Promotion
+      method: GET
+      path: /v1/promotions
+      emits: CatalogoConsultado
+      parameters: []
+    - id: CheckPromotionValidity
+      title: Consultar vigencia
+      kind: evaluate_validity
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}/validity
+      emits: VigenciaConsultada
+      parameters:
+        - name: at
+          in: query
+          type: datetime
+          required: true
+          description: Instante para el cual se evalúa la vigencia, en formato RFC3339.
+  policies:
+    - id: PromotionValidity
+      kind: active_between
+      entity: Promotion
+      start_field: starts_at
+      end_field: ends_at
+      enabled_field: enabled
+      inclusive_start: true
+      exclusive_end: true
+  flows:
+    - name: CatalogManagement
+      title: Gestión de catálogo
+      purpose: Crear y modificar promociones administradas.
+      operations:
+        - CreatePromotion
+        - UpdatePromotion
+    - name: AuthorizationSupport
+      title: Soporte a autorizaciones
+      purpose: Informar vigencia, cuotas y descuento para asistir al equipo autorizador.
+      operations:
+        - GetPromotion
+        - ListPromotions
+        - CheckPromotionValidity

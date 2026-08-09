@@ -1,0 +1,6 @@
+version: "0.2"
+kind: application_contract_approval
+proposal_id: sha256:fd7bc62ca4644a63635d86578718320d6a4e51ff2b149b7f29cd20ae13dd1801
+contract_id: sha256:28b4c61f85dd196f36aa5d25df9287b3b1a00bb81b24b03f5fc8e8f7d4999e31
+approved_by: marianoceneri
+approved_at: 2026-08-09T22:34:42.307Z

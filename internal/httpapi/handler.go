@@ -115,14 +115,14 @@ func (h *Handler) checkPromotionValidity(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "could not get promotion")
 		return
 	}
-	at, err := time.Parse(time.RFC3339, r.URL.Query().Get("at"))
+	evaluatedAt, err := time.Parse(time.RFC3339, r.URL.Query().Get("at"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "at must be an RFC3339 timestamp")
 		return
 	}
-	valid := !at.Before(value.StartsAt) && at.Before(value.EndsAt) && value.Enabled
+	valid := !evaluatedAt.Before(value.StartsAt) && evaluatedAt.Before(value.EndsAt) && value.Enabled
 	w.Header().Set("X-LORD-Event", "VigenciaConsultada")
-	writeJSON(w, http.StatusOK, map[string]any{"id": value.Id, "valid": valid, "at": at, "characteristics": value})
+	writeJSON(w, http.StatusOK, map[string]any{"id": value.Id, "valid": valid, "at": evaluatedAt, "characteristics": value})
 }
 
 func applyPromotionDefaults(value *domain.Promotion) {
