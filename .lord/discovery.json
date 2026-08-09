@@ -1,0 +1,672 @@
+{
+  "proposal_id": "sha256:d968196be54ae84e7235bce5078efa90eee3725ac51254df55e400c906ac1d70",
+  "proposal": {
+    "schema_version": "0.1",
+    "status": "proposal",
+    "repository_name": "promo-api",
+    "domain_summary": "Propuesta no normativa del contexto de promociones: un carrito válido se contrasta con todas las promociones catalogadas; cada promoción obtiene una evaluación de elegibilidad y, si corresponde, un descuento calculado sobre el subtotal aplicable. Después se elige entre la mejor promoción exclusiva y el conjunto de promociones acumulables, sin permitir que el descuento total supere el subtotal del carrito.",
+    "entities": [
+      {
+        "name": "Carrito",
+        "description": "Conjunto de artículos con SKU, categoría, cantidad y precio unitario, del cual se obtiene un subtotal.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "name": "Cliente",
+        "description": "Participante caracterizado por nivel y condición de primera compra, atributos usados para determinar elegibilidad.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/repository/memory.go"
+        ]
+      },
+      {
+        "name": "Promoción",
+        "description": "Definición con vigencia, ventana horaria, días habilitados, subtotal mínimo, porcentaje, tope, restricciones y modalidad acumulable o exclusiva.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/repository/memory.go"
+        ]
+      },
+      {
+        "name": "Cupón",
+        "description": "Código presentado con el carrito que puede ser requerido por una promoción.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "name": "Evaluación de promoción",
+        "description": "Resultado de evaluar una promoción, indicando elegibilidad y posibles motivos de rechazo.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "README.md"
+        ]
+      },
+      {
+        "name": "Descuento promocional",
+        "description": "Importe calculado para una promoción elegible sobre el subtotal aplicable, limitado por el máximo de esa promoción.",
+        "confidence": "inferred",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "name": "Cotización promocional",
+        "description": "Resultado agregado con subtotal, descuento, total, promociones aplicadas y evaluaciones.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "README.md"
+        ]
+      }
+    ],
+    "events": [
+      {
+        "name": "CarritoPresentadoParaEvaluacion",
+        "description": "Se presenta un carrito, junto con momento, canal, cliente y cupones, para determinar promociones.",
+        "confidence": "inferred",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "README.md"
+        ]
+      },
+      {
+        "name": "PromocionEvaluada",
+        "description": "Una promoción del catálogo recibe un resultado de elegibilidad y sus motivos de rechazo.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "README.md"
+        ]
+      },
+      {
+        "name": "PromocionDeterminadaElegible",
+        "description": "La evaluación de una promoción concluye sin motivos de rechazo.",
+        "confidence": "inferred",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/domain/promotion.go"
+        ]
+      },
+      {
+        "name": "PromocionRechazada",
+        "description": "La evaluación concluye con uno o más motivos de rechazo observables.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/service/quote_test.go",
+          "README.md"
+        ]
+      },
+      {
+        "name": "PromocionAplicada",
+        "description": "Una promoción seleccionada aporta un descuento a la cotización del carrito.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/service/quote_test.go",
+          "README.md"
+        ]
+      },
+      {
+        "name": "CotizacionPromocionalCalculada",
+        "description": "Se produce el resultado agregado del carrito con subtotal, descuento total, total final, aplicaciones y evaluaciones.",
+        "confidence": "inferred",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      }
+    ],
+    "candidate_rules": [
+      {
+        "candidate_id": "CR-001",
+        "kind": "initial",
+        "event": "CarritoPresentadoParaEvaluacion",
+        "required": null,
+        "trigger": null,
+        "target": null,
+        "prohibited": null,
+        "description": "La operación observada de promociones comienza con la presentación de un carrito para evaluación.",
+        "confidence": "inferred",
+        "basis": "Quote recibe primero los datos del carrito y valida sus elementos antes de consultar y evaluar promociones; el repositorio no establece si este evento es inicial en un ciclo de negocio más amplio."
+      },
+      {
+        "candidate_id": "CR-002",
+        "kind": "only_after",
+        "event": "PromocionDeterminadaElegible",
+        "required": "PromocionEvaluada",
+        "trigger": null,
+        "target": null,
+        "prohibited": null,
+        "description": "Una promoción solo puede ser determinada elegible después de haber sido evaluada.",
+        "confidence": "inferred",
+        "basis": "La elegibilidad se registra como parte del resultado de evaluación y equivale, en la implementación observada, a no haber obtenido motivos de rechazo."
+      },
+      {
+        "candidate_id": "CR-003",
+        "kind": "only_after",
+        "event": "PromocionRechazada",
+        "required": "PromocionEvaluada",
+        "trigger": null,
+        "target": null,
+        "prohibited": null,
+        "description": "Una promoción solo puede ser rechazada después de haber sido evaluada.",
+        "confidence": "inferred",
+        "basis": "Los motivos de rechazo se calculan durante la evaluación y quedan asociados a PromotionEvaluation."
+      },
+      {
+        "candidate_id": "CR-004",
+        "kind": "only_after",
+        "event": "PromocionAplicada",
+        "required": "PromocionDeterminadaElegible",
+        "trigger": null,
+        "target": null,
+        "prohibited": null,
+        "description": "Una promoción solo puede ser aplicada después de haber sido determinada elegible.",
+        "confidence": "inferred",
+        "basis": "Las promociones con motivos de rechazo no entran al conjunto de candidatas; solamente las elegibles con descuento positivo pueden participar de la selección."
+      },
+      {
+        "candidate_id": "CR-005",
+        "kind": "obliges",
+        "event": null,
+        "required": null,
+        "trigger": "CarritoPresentadoParaEvaluacion",
+        "target": "CotizacionPromocionalCalculada",
+        "prohibited": null,
+        "description": "La presentación aceptada de un carrito obliga a producir una cotización promocional.",
+        "confidence": "inferred",
+        "basis": "Para una solicitud de cotización válida, Quote evalúa promociones, selecciona aplicaciones y construye un resultado agregado; los fallos de repositorio impiden asegurar que esto siempre ocurra."
+      }
+    ],
+    "observed_behaviors": [
+      {
+        "statement": "Cada promoción recuperada del catálogo recibe exactamente una evaluación en la ejecución observada de una cotización válida.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go"
+        ]
+      },
+      {
+        "statement": "Una promoción es elegible cuando no se genera ninguno de los motivos observados: fuera de vigencia, día no permitido, fuera de horario diario, subtotal insuficiente, nivel no permitido, primera compra requerida, canal no permitido, cupón requerido, ausencia de artículos elegibles o zona horaria inválida.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/domain/promotion.go"
+        ]
+      },
+      {
+        "statement": "Las comparaciones de canal, nivel, cupón y categoría son insensibles a mayúsculas y minúsculas.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go"
+        ]
+      },
+      {
+        "statement": "La vigencia general incluye StartsAt y excluye EndsAt; las ventanas diarias ordinarias incluyen su inicio y excluyen su fin.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "statement": "Una ventana diaria cuyo inicio y fin coinciden se trata como habilitada durante todo el día, y una ventana cuyo inicio es posterior al fin atraviesa la medianoche.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/service/quote_test.go",
+          "internal/repository/memory.go"
+        ]
+      },
+      {
+        "statement": "El subtotal mínimo se contrasta contra el subtotal completo del carrito, incluso cuando el descuento solo corresponde a determinadas categorías.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "statement": "El descuento de una promoción se calcula como porcentaje entero del subtotal aplicable, truncando fracciones de centavo, y luego se limita por su máximo cuando este es positivo.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "statement": "Una promoción declarada elegible pero cuyo descuento calculado no es positivo no participa en la selección para aplicación.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go"
+        ]
+      },
+      {
+        "statement": "Entre promociones exclusivas elegibles se elige primero la de mayor descuento; ante igualdad se favorece la de mayor prioridad.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go"
+        ]
+      },
+      {
+        "statement": "Se compara la mejor promoción exclusiva con la suma limitada de las acumulables; la exclusiva gana también en caso de empate.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "statement": "Si ganan las acumulables, se aplican en prioridad descendente y, para igual prioridad, por identificador ascendente; cada descuento queda limitado por el saldo restante del subtotal.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go"
+        ]
+      },
+      {
+        "statement": "El descuento total y el total final nunca reducen el carrito por debajo de cero en la ejecución observada.",
+        "confidence": "explicit",
+        "evidence_paths": [
+          "internal/service/quote.go"
+        ]
+      }
+    ],
+    "ambiguities": [
+      {
+        "ambiguity_id": "A-001",
+        "question": "¿La evaluación debe abarcar obligatoriamente todas las promociones del catálogo vigente, o solo las que una etapa previa considere candidatas?",
+        "why_it_matters": "Determina si corresponde una obligación cuantificada de evaluar cada promoción por carrito; obliges(CarritoPresentadoParaEvaluacion, PromocionEvaluada) por sí sola solo exige una evaluación y no expresa “cada promoción”.",
+        "evidence_paths": [
+          "README.md",
+          "internal/service/quote.go",
+          "internal/repository/memory.go"
+        ],
+        "alternatives": [
+          {
+            "answer": "Todas las promociones catalogadas",
+            "consequence": "Se necesita una regla cuantificada y correlacionada por carrito y promoción."
+          },
+          {
+            "answer": "Solo candidatas prefiltradas",
+            "consequence": "El filtrado previo debe formar parte del contrato y definir qué promoción entra en evaluación."
+          }
+        ]
+      },
+      {
+        "ambiguity_id": "A-002",
+        "question": "¿Un subtotal mínimo de una promoción restringida por categorías debe medirse sobre todo el carrito o solamente sobre los artículos elegibles?",
+        "why_it_matters": "La implementación mide el mínimo sobre el carrito completo, pero calcula el descuento sobre las categorías aplicables; los nombres de campos y pruebas no confirman que esa asimetría sea política deseada.",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ],
+        "alternatives": [
+          {
+            "answer": "Subtotal completo del carrito",
+            "consequence": "Se conserva el comportamiento observado y artículos no elegibles pueden ayudar a alcanzar el mínimo."
+          },
+          {
+            "answer": "Subtotal de categorías elegibles",
+            "consequence": "Cambia la elegibilidad de promociones con alcance por categoría."
+          }
+        ]
+      },
+      {
+        "ambiguity_id": "A-003",
+        "question": "¿La prioridad debe intervenir solo en desempates y orden de acumulación, o debe ser el criterio principal de selección?",
+        "why_it_matters": "Las exclusivas se eligen principalmente por descuento, mientras las acumulables se consumen en orden de prioridad; esto da significados distintos al mismo atributo.",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/repository/memory.go"
+        ],
+        "alternatives": [
+          {
+            "answer": "Mantener los usos distintos observados",
+            "consequence": "La prioridad desempata exclusivas y ordena acumulables."
+          },
+          {
+            "answer": "Usar prioridad como criterio principal",
+            "consequence": "Puede aplicarse una promoción de menor descuento o cambiar la distribución de descuentos acumulados."
+          }
+        ]
+      },
+      {
+        "ambiguity_id": "A-004",
+        "question": "¿Una promoción elegible con descuento calculado igual a cero debe constar como seleccionada/aplicada o solamente como elegible?",
+        "why_it_matters": "Actualmente queda marcada elegible pero se excluye silenciosamente de las candidatas, por lo que elegibilidad y posibilidad de aplicación no coinciden.",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go"
+        ],
+        "alternatives": [
+          {
+            "answer": "Solo elegible",
+            "consequence": "Se conserva la distinción actual y podría requerirse un estado explícito de candidata no aplicable."
+          },
+          {
+            "answer": "Aplicada con descuento cero",
+            "consequence": "Cambiaría el conjunto de promociones aplicadas mostrado al negocio."
+          },
+          {
+            "answer": "Rechazada por descuento nulo",
+            "consequence": "Se necesitaría un nuevo motivo de rechazo."
+          }
+        ]
+      },
+      {
+        "ambiguity_id": "A-005",
+        "question": "¿La igualdad entre inicio y fin de la ventana diaria significa día completo o una ventana vacía?",
+        "why_it_matters": "El código interpreta la igualdad como disponibilidad durante todo el día, pero no hay una prueba específica ni documentación que confirme la política.",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/repository/memory.go"
+        ],
+        "alternatives": [
+          {
+            "answer": "Día completo",
+            "consequence": "Se conserva el comportamiento usado por VIP_WEEKEND15 y BOOKS25."
+          },
+          {
+            "answer": "Ventana vacía",
+            "consequence": "Esas promociones quedarían rechazadas por horario salvo que sus datos se modifiquen."
+          }
+        ]
+      },
+      {
+        "ambiguity_id": "A-006",
+        "question": "¿Los motivos de rechazo deben acumularse todos o debe informarse solo el primero o uno priorizado?",
+        "why_it_matters": "La implementación acumula todos los motivos detectados, pero el repositorio no define una política de prioridad o estabilidad del orden.",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "README.md"
+        ],
+        "alternatives": [
+          {
+            "answer": "Acumular todos en el orden observado",
+            "consequence": "El orden actual pasa a ser parte relevante del contrato."
+          },
+          {
+            "answer": "Acumular todos sin garantizar orden",
+            "consequence": "Se preserva la información sin convertir el orden en política."
+          },
+          {
+            "answer": "Informar un motivo prioritario",
+            "consequence": "Debe definirse una precedencia de rechazos."
+          }
+        ]
+      },
+      {
+        "ambiguity_id": "A-007",
+        "question": "¿El evento inicial del contrato es la presentación de cualquier carrito o únicamente la aceptación de un carrito con datos de negocio válidos?",
+        "why_it_matters": "La lógica valida momento, canal y artículos antes de evaluar promociones; el alcance excluye validación HTTP, pero no aclara si estas precondiciones pertenecen al negocio de promociones.",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/domain/promotion.go",
+          "internal/httpapi/handler.go"
+        ],
+        "alternatives": [
+          {
+            "answer": "Carrito de negocio válido",
+            "consequence": "La propuesta initial aplica solo después de satisfacer las precondiciones de cotización."
+          },
+          {
+            "answer": "Cualquier carrito presentado",
+            "consequence": "Deben modelarse también el rechazo del carrito y sus causas dentro del contexto."
+          }
+        ]
+      },
+      {
+        "ambiguity_id": "F-001",
+        "question": "Should CarritoPresentadoParaEvaluacion be a first-class event in this domain contract?",
+        "why_it_matters": "The repository supports the underlying behavior, but the event boundary itself was inferred. Keeping it creates contractual vocabulary; excluding it treats the behavior as a derived condition or as part of another layer.",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "README.md"
+        ],
+        "alternatives": [
+          {
+            "answer": "Keep it as a first-class domain event.",
+            "consequence": "Candidate rules may use CarritoPresentadoParaEvaluacion after operator ratification."
+          },
+          {
+            "answer": "Exclude it from this domain contract.",
+            "consequence": "Rules that depend on CarritoPresentadoParaEvaluacion must be excluded or reformulated with another evidenced event."
+          }
+        ]
+      },
+      {
+        "ambiguity_id": "F-002",
+        "question": "Should PromocionDeterminadaElegible be a first-class event in this domain contract?",
+        "why_it_matters": "The repository supports the underlying behavior, but the event boundary itself was inferred. Keeping it creates contractual vocabulary; excluding it treats the behavior as a derived condition or as part of another layer.",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/domain/promotion.go"
+        ],
+        "alternatives": [
+          {
+            "answer": "Keep it as a first-class domain event.",
+            "consequence": "Candidate rules may use PromocionDeterminadaElegible after operator ratification."
+          },
+          {
+            "answer": "Exclude it from this domain contract.",
+            "consequence": "Rules that depend on PromocionDeterminadaElegible must be excluded or reformulated with another evidenced event."
+          }
+        ]
+      },
+      {
+        "ambiguity_id": "F-003",
+        "question": "Should CotizacionPromocionalCalculada be a first-class event in this domain contract?",
+        "why_it_matters": "The repository supports the underlying behavior, but the event boundary itself was inferred. Keeping it creates contractual vocabulary; excluding it treats the behavior as a derived condition or as part of another layer.",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ],
+        "alternatives": [
+          {
+            "answer": "Keep it as a first-class domain event.",
+            "consequence": "Candidate rules may use CotizacionPromocionalCalculada after operator ratification."
+          },
+          {
+            "answer": "Exclude it from this domain contract.",
+            "consequence": "Rules that depend on CotizacionPromocionalCalculada must be excluded or reformulated with another evidenced event."
+          }
+        ]
+      }
+    ],
+    "unsupported_requirements": [
+      {
+        "requirement": "Evaluar exactamente una vez cada promoción del catálogo para cada carrito presentado.",
+        "reason": "Requiere cuantificación sobre el catálogo, correlación entre carrito y promoción y unicidad por instancia; unique(PromocionEvaluada) sería global y demasiado fuerte.",
+        "suggested_extension": "forall promotion in catalog(cart): exactly_once(evaluate(promotion), per=cart)",
+        "evidence_paths": [
+          "README.md",
+          "internal/service/quote.go"
+        ]
+      },
+      {
+        "requirement": "Determinar elegibilidad mediante rangos de fecha, zona horaria, días de semana, ventanas horarias, subtotal mínimo, nivel, primera compra, canal, cupón y categorías.",
+        "reason": "Las primitivas actuales no expresan predicados sobre atributos, límites temporales ni conjunciones de condiciones.",
+        "suggested_extension": "eligible(promotion, cart) iff predicates(date_window, local_daily_window, weekday, minimum_subtotal, tier, first_purchase, channel, coupon, applicable_items)",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go",
+          "internal/repository/memory.go"
+        ]
+      },
+      {
+        "requirement": "Calcular el descuento porcentual sobre el subtotal aplicable, truncarlo a centavos y limitarlo por el máximo de la promoción.",
+        "reason": "El vocabulario actual no representa fórmulas numéricas, redondeo, bases por categoría ni topes.",
+        "suggested_extension": "amount(discount(promotion, cart)) = min(floor(applicable_subtotal(promotion, cart) * percent_off / 100), maximum_discount)",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "requirement": "Elegir el máximo entre la mejor exclusiva y la suma de acumulables, favoreciendo la exclusiva en empate.",
+        "reason": "Las primitivas temporales no expresan optimización, agregación, comparación ni desempate.",
+        "suggested_extension": "select argmax_tiebreak(exclusive_best, capped_sum(stackable), tie=exclusive)",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "requirement": "Seleccionar la mejor exclusiva por mayor descuento y, ante igualdad, mayor prioridad.",
+        "reason": "No existe una primitiva para ranking multicriterio.",
+        "suggested_extension": "rank(exclusive_candidates, by=[discount desc, priority desc, stable_order])",
+        "evidence_paths": [
+          "internal/service/quote.go"
+        ]
+      },
+      {
+        "requirement": "Aplicar acumulables en prioridad descendente y por identificador ascendente en caso de igualdad, limitando cada una por el saldo restante.",
+        "reason": "Requiere orden total, estado numérico restante y actualización secuencial.",
+        "suggested_extension": "fold(sorted(stackable, priority desc, id asc), remaining=subtotal, apply=min(candidate_discount, remaining))",
+        "evidence_paths": [
+          "internal/service/quote.go"
+        ]
+      },
+      {
+        "requirement": "El descuento agregado no puede superar el subtotal del carrito.",
+        "reason": "Es una invariante numérica que no puede expresarse con initial, unique, only_after, obliges o prohibits_after.",
+        "suggested_extension": "invariant(total_discount(cart) <= subtotal(cart))",
+        "evidence_paths": [
+          "internal/service/quote.go",
+          "internal/service/quote_test.go"
+        ]
+      },
+      {
+        "requirement": "Correlacionar evaluación, elegibilidad, rechazo, aplicación y cotización con el mismo carrito y la misma promoción.",
+        "reason": "Las reglas candidatas expresan precedencia sin identidad de instancia, lo que permitiría satisfacerlas con eventos de otro carrito o promoción.",
+        "suggested_extension": "Agregar claves de correlación y relaciones parametrizadas, por ejemplo only_after(A(cart,promotion), B(cart,promotion)).",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go"
+        ]
+      },
+      {
+        "requirement": "Registrar todos los motivos de rechazo producidos por una misma evaluación.",
+        "reason": "El vocabulario no expresa colecciones, exhaustividad ni asociación de múltiples motivos con una evaluación.",
+        "suggested_extension": "collect_all(rejection_reason(promotion, cart), into=evaluation(promotion, cart))",
+        "evidence_paths": [
+          "internal/domain/promotion.go",
+          "internal/service/quote.go"
+        ]
+      }
+    ],
+    "coverage": {
+      "well_supported": [
+        "Atributos que intervienen en la elegibilidad",
+        "Catálogo sembrado de promociones y sus restricciones",
+        "Cálculo porcentual, alcance por categoría y topes",
+        "Ventanas de vigencia, horarios ordinarios y horarios nocturnos",
+        "Motivos observados de rechazo",
+        "Selección entre promociones exclusivas y acumulables",
+        "Límite del descuento por el subtotal del carrito"
+      ],
+      "weak_or_missing": [
+        "Intención empresarial detrás de los comportamientos implementados",
+        "Semántica contractual de prioridad y desempates completos",
+        "Política para promociones elegibles con descuento cero",
+        "Política del subtotal mínimo en promociones por categoría",
+        "Exhaustividad y orden contractual de motivos de rechazo",
+        "Cuantificación y correlación por carrito/promoción",
+        "Comportamiento ante catálogo vacío o error al obtener promociones",
+        "Definición empresarial de ventanas con inicio igual a fin"
+      ]
+    }
+  },
+  "framing": {
+    "status": "confirmed",
+    "scope": {
+      "schema_version": "0.1",
+      "bounded_context": "promotions",
+      "perspective": "business",
+      "purpose": "Definir la elegibilidad, selección, acumulación y aplicación de promociones sobre un carrito.",
+      "includes": [
+        "evaluación de elegibilidad de cada promoción",
+        "cálculo y límites de descuentos",
+        "selección entre promociones acumulables y exclusivas",
+        "motivos de rechazo de promociones"
+      ],
+      "excludes": [
+        "validación del protocolo HTTP",
+        "serialización y formato JSON",
+        "códigos de estado de la API",
+        "ciclo técnico request/response"
+      ],
+      "confirmed_by": "marianoceneri"
+    },
+    "verdict": "aligned",
+    "diagnostics": [
+      {
+        "code": "inferred_event",
+        "severity": "warning",
+        "message": "CarritoPresentadoParaEvaluacion is an inferred event and requires an explicit operator decision before entering contractual vocabulary.",
+        "related_concepts": [
+          "CarritoPresentadoParaEvaluacion"
+        ]
+      },
+      {
+        "code": "inferred_event",
+        "severity": "warning",
+        "message": "PromocionDeterminadaElegible is an inferred event and requires an explicit operator decision before entering contractual vocabulary.",
+        "related_concepts": [
+          "PromocionDeterminadaElegible"
+        ]
+      },
+      {
+        "code": "inferred_event",
+        "severity": "warning",
+        "message": "CotizacionPromocionalCalculada is an inferred event and requires an explicit operator decision before entering contractual vocabulary.",
+        "related_concepts": [
+          "CotizacionPromocionalCalculada"
+        ]
+      }
+    ]
+  },
+  "evidence": {
+    "evidence_id": "sha256:fddb1026cc357909e57a16272723705dfe4b25b1ac81b7397ed045a49907c259",
+    "files_included": 12,
+    "files_omitted": 0,
+    "bytes_included": 25826,
+    "redactions": 0,
+    "languages": [
+      "Go"
+    ]
+  },
+  "provenance": {
+    "provider": "openai-account",
+    "model": "gpt-5.6-sol",
+    "response_id": "codex-9ba6a15d-2e1f-409f-95a3-a0ac70ced120"
+  }
+}

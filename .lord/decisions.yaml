@@ -1,0 +1,104 @@
+version: "0.1"
+proposal_id: sha256:d968196be54ae84e7235bce5078efa90eee3725ac51254df55e400c906ac1d70
+subject: promo-api
+decisions:
+  - decision_id: b845eca6-f68a-4b8d-a3a5-5c2e4b5bdac6
+    ambiguity_id: A-001
+    revision: 1
+    question: ¿La evaluación debe abarcar obligatoriamente todas las promociones del catálogo vigente, o solo las que una etapa previa considere candidatas?
+    selected_choice: 1
+    selected_answer: Todas las promociones catalogadas
+    consequence: Se necesita una regla cuantificada y correlacionada por carrito y promoción.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:23.051Z
+  - decision_id: adebd0fe-d518-4a6e-affb-d8d970dca248
+    ambiguity_id: A-002
+    revision: 1
+    question: ¿Un subtotal mínimo de una promoción restringida por categorías debe medirse sobre todo el carrito o solamente sobre los artículos elegibles?
+    selected_choice: 1
+    selected_answer: Subtotal completo del carrito
+    consequence: Se conserva el comportamiento observado y artículos no elegibles pueden ayudar a alcanzar el mínimo.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:23.432Z
+  - decision_id: b03cea14-d80e-4e20-9c44-95a5da8bf11b
+    ambiguity_id: A-003
+    revision: 1
+    question: ¿La prioridad debe intervenir solo en desempates y orden de acumulación, o debe ser el criterio principal de selección?
+    selected_choice: 1
+    selected_answer: Mantener los usos distintos observados
+    consequence: La prioridad desempata exclusivas y ordena acumulables.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:23.818Z
+  - decision_id: bf56cc5f-1b1f-4034-801c-fb942196c8d6
+    ambiguity_id: A-004
+    revision: 1
+    question: ¿Una promoción elegible con descuento calculado igual a cero debe constar como seleccionada/aplicada o solamente como elegible?
+    selected_choice: 1
+    selected_answer: Solo elegible
+    consequence: Se conserva la distinción actual y podría requerirse un estado explícito de candidata no aplicable.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:24.202Z
+  - decision_id: 4119a795-00ec-466f-8c98-1b91bb077aec
+    ambiguity_id: A-005
+    revision: 1
+    question: ¿La igualdad entre inicio y fin de la ventana diaria significa día completo o una ventana vacía?
+    selected_choice: 1
+    selected_answer: Día completo
+    consequence: Se conserva el comportamiento usado por VIP_WEEKEND15 y BOOKS25.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:24.587Z
+  - decision_id: 4b7e19ee-f52c-4fef-8b35-0f5f8ebf32ae
+    ambiguity_id: A-006
+    revision: 1
+    question: ¿Los motivos de rechazo deben acumularse todos o debe informarse solo el primero o uno priorizado?
+    selected_choice: 2
+    selected_answer: Acumular todos sin garantizar orden
+    consequence: Se preserva la información sin convertir el orden en política.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:24.974Z
+  - decision_id: 13f1849b-7014-4b21-8560-cfe1d0a6e75a
+    ambiguity_id: A-007
+    revision: 1
+    question: ¿El evento inicial del contrato es la presentación de cualquier carrito o únicamente la aceptación de un carrito con datos de negocio válidos?
+    selected_choice: 1
+    selected_answer: Carrito de negocio válido
+    consequence: La propuesta initial aplica solo después de satisfacer las precondiciones de cotización.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:25.357Z
+  - decision_id: 1897402f-3bda-40b0-9048-63a9ccb0c648
+    ambiguity_id: F-001
+    revision: 1
+    question: Should CarritoPresentadoParaEvaluacion be a first-class event in this domain contract?
+    selected_choice: 1
+    selected_answer: Keep it as a first-class domain event.
+    consequence: Candidate rules may use CarritoPresentadoParaEvaluacion after operator ratification.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:25.739Z
+  - decision_id: bfe8c0d9-46a1-458b-a391-7cb5a4ee7403
+    ambiguity_id: F-002
+    revision: 1
+    question: Should PromocionDeterminadaElegible be a first-class event in this domain contract?
+    selected_choice: 1
+    selected_answer: Keep it as a first-class domain event.
+    consequence: Candidate rules may use PromocionDeterminadaElegible after operator ratification.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:26.122Z
+  - decision_id: f9a86b24-cd31-4a3e-a511-a8eb0e5c671d
+    ambiguity_id: F-003
+    revision: 1
+    question: Should CotizacionPromocionalCalculada be a first-class event in this domain contract?
+    selected_choice: 1
+    selected_answer: Keep it as a first-class domain event.
+    consequence: Candidate rules may use CotizacionPromocionalCalculada after operator ratification.
+    rationale: Decisión base para evaluar el prototipo de LORD con encuadre explícito
+    decided_by: marianoceneri
+    decided_at: 2026-08-09T19:40:26.506Z

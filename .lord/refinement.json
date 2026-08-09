@@ -1,0 +1,246 @@
+{
+  "refinement_id": "sha256:90f3e98415e0c9d29e22136b10020976ae5b7d888274eca19499675422918b29",
+  "source_proposal_id": "sha256:d968196be54ae84e7235bce5078efa90eee3725ac51254df55e400c906ac1d70",
+  "refinement": {
+    "schema_version": "0.1",
+    "status": "proposal",
+    "contract_name": "promotions-business-contract-refinement",
+    "rationale": "Refinamiento no normativo del contrato de promociones desde la perspectiva de negocio confirmada. Conserva las cinco reglas temporales candidatas respaldadas por el descubrimiento, incorpora como vocabulario los tres eventos inferidos ratificados por el operador y aplica todas las decisiones sin convertir observaciones del repositorio en prueba de intención empresarial. Los requisitos cuantificados, correlacionados, condicionales, temporales, colectivos y aritméticos permanecen fuera del vocabulario temporal disponible.",
+    "vocabulary_events": [
+      "CarritoPresentadoParaEvaluacion",
+      "PromocionEvaluada",
+      "PromocionDeterminadaElegible",
+      "PromocionRechazada",
+      "PromocionAplicada",
+      "CotizacionPromocionalCalculada"
+    ],
+    "rules": [
+      {
+        "candidate_id": "CR-001",
+        "kind": "initial",
+        "event": "CarritoPresentadoParaEvaluacion",
+        "required": null,
+        "trigger": null,
+        "target": null,
+        "prohibited": null,
+        "description": "La operación de promociones comienza con la presentación para evaluación de un carrito que satisface las precondiciones de negocio de la cotización.",
+        "confidence": "inferred",
+        "basis": "El descubrimiento observa que Quote recibe y valida los datos del carrito antes de evaluar promociones. A-007 limita el evento inicial a un carrito de negocio válido y F-001 ratifica CarritoPresentadoParaEvaluacion como evento de primera clase."
+      },
+      {
+        "candidate_id": "CR-002",
+        "kind": "only_after",
+        "event": "PromocionDeterminadaElegible",
+        "required": "PromocionEvaluada",
+        "trigger": null,
+        "target": null,
+        "prohibited": null,
+        "description": "Una promoción solo puede ser determinada elegible después de haber sido evaluada.",
+        "confidence": "inferred",
+        "basis": "La elegibilidad se registra como resultado de la evaluación observada y equivale a no producir motivos de rechazo. F-002 ratifica PromocionDeterminadaElegible como evento de primera clase."
+      },
+      {
+        "candidate_id": "CR-003",
+        "kind": "only_after",
+        "event": "PromocionRechazada",
+        "required": "PromocionEvaluada",
+        "trigger": null,
+        "target": null,
+        "prohibited": null,
+        "description": "Una promoción solo puede ser rechazada después de haber sido evaluada.",
+        "confidence": "inferred",
+        "basis": "Los motivos de rechazo se calculan durante la evaluación y quedan asociados al resultado PromotionEvaluation observado en el repositorio."
+      },
+      {
+        "candidate_id": "CR-004",
+        "kind": "only_after",
+        "event": "PromocionAplicada",
+        "required": "PromocionDeterminadaElegible",
+        "trigger": null,
+        "target": null,
+        "prohibited": null,
+        "description": "Una promoción solo puede ser aplicada después de haber sido determinada elegible.",
+        "confidence": "inferred",
+        "basis": "Las promociones rechazadas no ingresan al conjunto observado de candidatas. A-004 mantiene como solamente elegible una promoción cuyo descuento sea cero; esa condición adicional no es expresable mediante only_after."
+      },
+      {
+        "candidate_id": "CR-005",
+        "kind": "obliges",
+        "event": null,
+        "required": null,
+        "trigger": "CarritoPresentadoParaEvaluacion",
+        "target": "CotizacionPromocionalCalculada",
+        "prohibited": null,
+        "description": "La presentación para evaluación de un carrito de negocio válido obliga a producir una cotización promocional.",
+        "confidence": "inferred",
+        "basis": "Para una solicitud de negocio válida, Quote evalúa promociones, selecciona aplicaciones y construye un resultado agregado. A-007 define el alcance del disparador, mientras F-001 y F-003 ratifican ambos eventos de la relación."
+      }
+    ],
+    "decisions_applied": [
+      {
+        "ambiguity_id": "A-001",
+        "revision": 1,
+        "effect": "Se adopta que deben evaluarse todas las promociones catalogadas. La cuantificación, la exactitud y la correlación por carrito y promoción se conservan como requisito no soportado, sin añadir una regla obliges que solo exigiría una evaluación."
+      },
+      {
+        "ambiguity_id": "A-002",
+        "revision": 1,
+        "effect": "El subtotal mínimo se determina sobre el subtotal completo del carrito, incluso cuando la promoción restringe las categorías usadas para calcular el descuento; esta condición queda como semántica aritmética no soportada."
+      },
+      {
+        "ambiguity_id": "A-003",
+        "revision": 1,
+        "effect": "Se mantienen los usos distintos observados de la prioridad: desempata promociones exclusivas y ordena la aplicación de acumulables. El ranking permanece como requisito no soportado."
+      },
+      {
+        "ambiguity_id": "A-004",
+        "revision": 1,
+        "effect": "Una promoción elegible con descuento calculado igual a cero permanece solamente elegible y no se considera aplicada; el guard basado en el importe queda como requisito no soportado."
+      },
+      {
+        "ambiguity_id": "A-005",
+        "revision": 1,
+        "effect": "Una ventana diaria cuyo inicio coincide con su fin representa un día completo; la semántica de ventanas temporales queda como requisito no soportado."
+      },
+      {
+        "ambiguity_id": "A-006",
+        "revision": 1,
+        "effect": "Deben acumularse todos los motivos de rechazo sin garantizar su orden; la colección exhaustiva y su asociación con la evaluación quedan como requisito no soportado."
+      },
+      {
+        "ambiguity_id": "A-007",
+        "revision": 1,
+        "effect": "CarritoPresentadoParaEvaluacion representa únicamente un carrito que satisface las precondiciones de negocio de la cotización. Este alcance se aplica a CR-001 y CR-005; la expresión de dichas precondiciones como guards queda fuera del vocabulario."
+      },
+      {
+        "ambiguity_id": "F-001",
+        "revision": 1,
+        "effect": "CarritoPresentadoParaEvaluacion se conserva como evento de primera clase y puede utilizarse en CR-001 y CR-005."
+      },
+      {
+        "ambiguity_id": "F-002",
+        "revision": 1,
+        "effect": "PromocionDeterminadaElegible se conserva como evento de primera clase y puede utilizarse en CR-002 y CR-004."
+      },
+      {
+        "ambiguity_id": "F-003",
+        "revision": 1,
+        "effect": "CotizacionPromocionalCalculada se conserva como evento de primera clase y puede utilizarse como objetivo de CR-005."
+      }
+    ],
+    "excluded_candidate_rules": [],
+    "new_ambiguities": [],
+    "unsupported_requirements": [
+      {
+        "requirement": "Evaluar exactamente una vez cada promoción catalogada para cada carrito de negocio válido presentado.",
+        "reason": "La decisión A-001 exige cuantificación sobre el catálogo, correlación entre carrito y promoción y unicidad por instancia. unique(PromocionEvaluada) impondría unicidad global y obliges(CarritoPresentadoParaEvaluacion, PromocionEvaluada) no expresaría «cada promoción» ni «exactamente una vez».",
+        "suggested_extension": "forall promotion in catalog(cart): exactly_once(evaluate(promotion), per=cart)"
+      },
+      {
+        "requirement": "Determinar elegibilidad mediante vigencia, zona horaria, días habilitados, ventanas diarias, subtotal mínimo calculado sobre el carrito completo, nivel, primera compra, canal, cupón y existencia de artículos aplicables; una ventana con inicio igual a fin representa el día completo.",
+        "reason": "Las primitivas disponibles no expresan predicados sobre atributos, conjunciones, límites temporales ni las decisiones A-002 y A-005.",
+        "suggested_extension": "eligible(promotion, cart) iff predicates(date_window, local_daily_window(equal_bounds=full_day), weekday, minimum_full_cart_subtotal, tier, first_purchase, channel, coupon, applicable_items)"
+      },
+      {
+        "requirement": "Calcular el descuento porcentual sobre el subtotal aplicable, truncar fracciones de centavo y limitar el resultado por el máximo positivo de la promoción.",
+        "reason": "El vocabulario actual no representa fórmulas numéricas, redondeo, bases por categoría ni topes.",
+        "suggested_extension": "amount(discount(promotion, cart)) = min(floor(applicable_subtotal(promotion, cart) * percent_off / 100), positive_maximum_discount_if_present)"
+      },
+      {
+        "requirement": "Mantener solamente como elegible, y no como aplicada, una promoción cuyo descuento calculado sea igual a cero.",
+        "reason": "La decisión A-004 introduce un guard sobre un importe. Las relaciones temporales disponibles no expresan condiciones de payload o aritméticas para impedir la aplicación.",
+        "suggested_extension": "candidate_for_application(promotion, cart) iff eligible(promotion, cart) and calculated_discount(promotion, cart) > 0"
+      },
+      {
+        "requirement": "Elegir entre la mejor promoción exclusiva y la suma limitada de las acumulables, favoreciendo la exclusiva en caso de empate.",
+        "reason": "Las primitivas temporales no expresan optimización, agregación, comparación ni desempate.",
+        "suggested_extension": "select argmax_tiebreak(exclusive_best, capped_sum(stackable), tie=exclusive)"
+      },
+      {
+        "requirement": "Seleccionar la mejor promoción exclusiva principalmente por mayor descuento y, ante igualdad, por mayor prioridad.",
+        "reason": "La decisión A-003 conserva este uso de la prioridad, pero no existe una primitiva para ranking multicriterio.",
+        "suggested_extension": "rank(exclusive_candidates, by=[discount desc, priority desc, stable_order])"
+      },
+      {
+        "requirement": "Aplicar promociones acumulables en prioridad descendente y, para igual prioridad, por identificador ascendente, limitando cada descuento por el saldo restante.",
+        "reason": "La decisión A-003 conserva este uso distinto de la prioridad. Su expresión requiere orden total, estado numérico restante y actualización secuencial.",
+        "suggested_extension": "fold(sorted(stackable, priority desc, id asc), remaining=subtotal, apply=min(candidate_discount, remaining))"
+      },
+      {
+        "requirement": "El descuento agregado no puede superar el subtotal del carrito.",
+        "reason": "Es una invariante numérica que no puede expresarse con initial, unique, only_after, obliges o prohibits_after.",
+        "suggested_extension": "invariant(total_discount(cart) <= subtotal(cart))"
+      },
+      {
+        "requirement": "Correlacionar presentación, evaluación, elegibilidad, rechazo, aplicación y cotización con el mismo carrito y, cuando corresponda, con la misma promoción.",
+        "reason": "Las reglas temporales disponibles expresan precedencia u obligación sin identidad de instancia, por lo que podrían satisfacerse mediante eventos pertenecientes a otro carrito o promoción.",
+        "suggested_extension": "Agregar claves de correlación y relaciones parametrizadas, por ejemplo only_after(A(cart,promotion), B(cart,promotion))."
+      },
+      {
+        "requirement": "Registrar todos los motivos de rechazo producidos por una misma evaluación sin garantizar su orden.",
+        "reason": "La decisión A-006 requiere una colección exhaustiva asociada con una evaluación, mientras el vocabulario no expresa colecciones, exhaustividad, asociación por instancia ni ausencia de garantía de orden.",
+        "suggested_extension": "collect_all(rejection_reason(promotion, cart), into=evaluation(promotion, cart), ordering=unspecified)"
+      },
+      {
+        "requirement": "Reconocer CarritoPresentadoParaEvaluacion únicamente cuando se satisfacen las precondiciones de negocio de la cotización.",
+        "reason": "La decisión A-007 delimita el evento mediante condiciones de validez de negocio, pero el vocabulario actual no expresa guards ni predicados sobre los datos del carrito.",
+        "suggested_extension": "emit CarritoPresentadoParaEvaluacion(cart) iff business_quote_preconditions(cart)"
+      }
+    ]
+  },
+  "contract_draft": {
+    "version": "0.1",
+    "name": "promotions-business-contract-refinement",
+    "vocabulary": {
+      "events": [
+        "CarritoPresentadoParaEvaluacion",
+        "CotizacionPromocionalCalculada",
+        "PromocionAplicada",
+        "PromocionDeterminadaElegible",
+        "PromocionEvaluada",
+        "PromocionRechazada"
+      ]
+    },
+    "rules": [
+      {
+        "id": "CR-001",
+        "description": "La operación de promociones comienza con la presentación para evaluación de un carrito que satisface las precondiciones de negocio de la cotización.",
+        "kind": "initial",
+        "event": "CarritoPresentadoParaEvaluacion"
+      },
+      {
+        "id": "CR-002",
+        "description": "Una promoción solo puede ser determinada elegible después de haber sido evaluada.",
+        "kind": "only_after",
+        "event": "PromocionDeterminadaElegible",
+        "required": "PromocionEvaluada"
+      },
+      {
+        "id": "CR-003",
+        "description": "Una promoción solo puede ser rechazada después de haber sido evaluada.",
+        "kind": "only_after",
+        "event": "PromocionRechazada",
+        "required": "PromocionEvaluada"
+      },
+      {
+        "id": "CR-004",
+        "description": "Una promoción solo puede ser aplicada después de haber sido determinada elegible.",
+        "kind": "only_after",
+        "event": "PromocionAplicada",
+        "required": "PromocionDeterminadaElegible"
+      },
+      {
+        "id": "CR-005",
+        "description": "La presentación para evaluación de un carrito de negocio válido obliga a producir una cotización promocional.",
+        "kind": "obliges",
+        "trigger": "CarritoPresentadoParaEvaluacion",
+        "target": "CotizacionPromocionalCalculada"
+      }
+    ]
+  },
+  "provenance": {
+    "provider": "openai-account",
+    "model": "gpt-5.6-sol",
+    "response_id": "codex-34f9f0d5-8e2d-43c0-8212-a4f34446e7a6"
+  }
+}

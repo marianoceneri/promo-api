@@ -1,0 +1,36 @@
+# LORD contract draft — non-normative until explicitly approved
+version: "0.1"
+name: promotions-business-contract-refinement
+vocabulary:
+  events:
+    - CarritoPresentadoParaEvaluacion
+    - CotizacionPromocionalCalculada
+    - PromocionAplicada
+    - PromocionDeterminadaElegible
+    - PromocionEvaluada
+    - PromocionRechazada
+rules:
+  - id: CR-001
+    description: La operación de promociones comienza con la presentación para evaluación de un carrito que satisface las precondiciones de negocio de la cotización.
+    kind: initial
+    event: CarritoPresentadoParaEvaluacion
+  - id: CR-002
+    description: Una promoción solo puede ser determinada elegible después de haber sido evaluada.
+    kind: only_after
+    event: PromocionDeterminadaElegible
+    required: PromocionEvaluada
+  - id: CR-003
+    description: Una promoción solo puede ser rechazada después de haber sido evaluada.
+    kind: only_after
+    event: PromocionRechazada
+    required: PromocionEvaluada
+  - id: CR-004
+    description: Una promoción solo puede ser aplicada después de haber sido determinada elegible.
+    kind: only_after
+    event: PromocionAplicada
+    required: PromocionDeterminadaElegible
+  - id: CR-005
+    description: La presentación para evaluación de un carrito de negocio válido obliga a producir una cotización promocional.
+    kind: obliges
+    trigger: CarritoPresentadoParaEvaluacion
+    target: CotizacionPromocionalCalculada

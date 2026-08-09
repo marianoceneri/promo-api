@@ -1,0 +1,15 @@
+schema_version: "0.1"
+bounded_context: promotions
+perspective: business
+purpose: Definir la elegibilidad, selección, acumulación y aplicación de promociones sobre un carrito.
+includes:
+  - evaluación de elegibilidad de cada promoción
+  - cálculo y límites de descuentos
+  - selección entre promociones acumulables y exclusivas
+  - motivos de rechazo de promociones
+excludes:
+  - validación del protocolo HTTP
+  - serialización y formato JSON
+  - códigos de estado de la API
+  - ciclo técnico request/response
+confirmed_by: marianoceneri
