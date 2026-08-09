@@ -11,18 +11,23 @@ import (
 	"time"
 
 	"github.com/marianoceneri/promo-api/internal/domain"
+	"github.com/marianoceneri/promo-api/internal/observability"
 	"github.com/marianoceneri/promo-api/internal/store"
 )
 
 type Handler struct {
 	promotions *store.PromotionStore
+	events     *observability.Recorder
 }
 
 func NewHandler(promotions *store.PromotionStore) http.Handler {
-	handler := &Handler{promotions: promotions}
+	handler := &Handler{promotions: promotions, events: observability.NewRecorder()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	mux.HandleFunc("GET /_lord/events", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"history_complete": true, "final": true, "events": handler.events.Snapshot()})
 	})
 	mux.HandleFunc("POST /v1/promotions", handler.createPromotion)
 	mux.HandleFunc("PUT /v1/promotions/{id}", handler.updatePromotion)
@@ -52,6 +57,7 @@ func (h *Handler) createPromotion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-LORD-Event", "PromocionCreada")
+	h.events.Record("PromocionCreada", map[string]any{"promotion_id": value.Id})
 	writeJSON(w, http.StatusCreated, value)
 }
 
@@ -83,6 +89,7 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-LORD-Event", "PromocionActualizada")
+	h.events.Record("PromocionActualizada", map[string]any{"promotion_id": value.Id})
 	writeJSON(w, http.StatusOK, value)
 }
 
@@ -97,11 +104,13 @@ func (h *Handler) getPromotion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-LORD-Event", "PromocionConsultada")
+	h.events.Record("PromocionConsultada", map[string]any{"promotion_id": value.Id})
 	writeJSON(w, http.StatusOK, value)
 }
 
 func (h *Handler) listPromotions(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("X-LORD-Event", "CatalogoConsultado")
+	h.events.Record("CatalogoConsultado", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"promotions": h.promotions.List()})
 }
 
@@ -122,6 +131,7 @@ func (h *Handler) checkPromotionValidity(w http.ResponseWriter, r *http.Request)
 	}
 	valid := !evaluatedAt.Before(value.StartsAt) && evaluatedAt.Before(value.EndsAt) && value.Enabled
 	w.Header().Set("X-LORD-Event", "VigenciaConsultada")
+	h.events.Record("VigenciaConsultada", map[string]any{"promotion_id": value.Id})
 	writeJSON(w, http.StatusOK, map[string]any{"id": value.Id, "valid": valid, "at": evaluatedAt, "characteristics": value})
 }
 

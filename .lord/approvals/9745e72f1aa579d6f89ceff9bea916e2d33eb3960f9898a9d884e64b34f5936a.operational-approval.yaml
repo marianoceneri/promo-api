@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: operational_contract_approval
+approval_id: sha256:9745e72f1aa579d6f89ceff9bea916e2d33eb3960f9898a9d884e64b34f5936a
+proposal_id: sha256:0888da4aa490a248d85913d269def55634f0d01890326bdfbcfd53f529b9bd50
+source_contract_id: sha256:3de4538916b00dfd1a200963b4a709db01098c5677a3f9a89bf3e2cd7582596e
+contract_id: sha256:3de4538916b00dfd1a200963b4a709db01098c5677a3f9a89bf3e2cd7582596e
+approved_by: marianoceneri
+approved_at: 2026-08-09T23:30:42.758Z
+rationale: Ratify the existing operational rules under LORD approval format v0.3.

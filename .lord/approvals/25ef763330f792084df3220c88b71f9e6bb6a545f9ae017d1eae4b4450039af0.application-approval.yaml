@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: application_contract_approval
+approval_id: sha256:25ef763330f792084df3220c88b71f9e6bb6a545f9ae017d1eae4b4450039af0
+proposal_id: sha256:320edd7e0c79544ebce5e2605d41a7f436c38542213a36a675c95be400f2afee
+source_contract_id: sha256:059375c5c3c9d4796de53d3d17778be4ad9071f00c8bd2ab6b015f7350bb039b
+contract_id: sha256:bbdd4111b650fd48fbb3d2b7ea24b6299de2cfd0fb3baa7a5c16bdd460bf9d69
+approved_by: marianoceneri
+approved_at: 2026-08-09T23:30:42.749Z
+rationale: Approved migration to correlated, verifiable runtime events.

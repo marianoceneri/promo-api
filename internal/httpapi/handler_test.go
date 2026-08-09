@@ -49,6 +49,27 @@ func TestPromotionContractFlow(t *testing.T) {
 	if response.Header().Get("X-LORD-Event") != "VigenciaConsultada" {
 		t.Fatal("validity check did not emit its contractual event")
 	}
+	request = httptest.NewRequest(http.MethodGet, "/_lord/events", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("events status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var events struct {
+		Events []struct {
+			Type string         `json:"type"`
+			Data map[string]any `json:"data"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &events); err != nil {
+		t.Fatal(err)
+	}
+	if len(events.Events) == 0 {
+		t.Fatal("expected structured LORD runtime events")
+	}
+	if events.Events[0].Data["promotion_id"] != "PROMO-TEST" {
+		t.Fatalf("missing runtime correlation: %#v", events.Events[0].Data)
+	}
 }
 
 func TestPromotionInstallmentsContractBoundaries(t *testing.T) {

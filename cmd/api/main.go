@@ -12,6 +12,6 @@ import (
 func main() {
 	promotionStore := store.NewPromotionStore()
 	handler := httpapi.NewHandler(promotionStore)
-	log.Printf("promo-api listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", handler))
+	log.Printf("promo-api listening on 127.0.0.1:8080")
+	log.Fatal(http.ListenAndServe("127.0.0.1:8080", handler))
 }

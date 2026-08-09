@@ -51,6 +51,8 @@ operations:
     method: POST
     path: /v1/promotions
     emits: PromocionCreada
+    correlation:
+      promotion_id: id
     parameters: []
   - id: UpdatePromotion
     title: Modificar promoción
@@ -59,6 +61,8 @@ operations:
     method: PUT
     path: /v1/promotions/{id}
     emits: PromocionActualizada
+    correlation:
+      promotion_id: id
     parameters: []
   - id: GetPromotion
     title: Consultar promoción
@@ -67,6 +71,8 @@ operations:
     method: GET
     path: /v1/promotions/{id}
     emits: PromocionConsultada
+    correlation:
+      promotion_id: id
     parameters: []
   - id: ListPromotions
     title: Listar promociones
@@ -75,6 +81,7 @@ operations:
     method: GET
     path: /v1/promotions
     emits: CatalogoConsultado
+    correlation: {}
     parameters: []
   - id: CheckPromotionValidity
     title: Consultar vigencia
@@ -83,6 +90,8 @@ operations:
     method: GET
     path: /v1/promotions/{id}/validity
     emits: VigenciaConsultada
+    correlation:
+      promotion_id: id
     parameters:
       - name: at
         in: query
