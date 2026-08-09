@@ -2,16 +2,22 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"time"
 
 	"github.com/marianoceneri/promo-api/internal/domain"
 )
 
+var ErrPromotionExists = errors.New("promotion already exists")
+
 type PromotionRepository interface {
 	List(context.Context) ([]domain.Promotion, error)
+	Create(context.Context, domain.Promotion) error
 }
 
 type MemoryPromotionRepository struct {
+	mu         sync.RWMutex
 	promotions []domain.Promotion
 }
 
@@ -20,12 +26,41 @@ func NewMemoryPromotionRepository() *MemoryPromotionRepository {
 }
 
 func NewMemoryPromotionRepositoryWith(promotions []domain.Promotion) *MemoryPromotionRepository {
-	copyOfPromotions := append([]domain.Promotion(nil), promotions...)
+	copyOfPromotions := clonePromotions(promotions)
 	return &MemoryPromotionRepository{promotions: copyOfPromotions}
 }
 
 func (r *MemoryPromotionRepository) List(context.Context) ([]domain.Promotion, error) {
-	return append([]domain.Promotion(nil), r.promotions...), nil
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return clonePromotions(r.promotions), nil
+}
+
+func (r *MemoryPromotionRepository) Create(_ context.Context, promotion domain.Promotion) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.promotions {
+		if existing.ID == promotion.ID {
+			return ErrPromotionExists
+		}
+	}
+	r.promotions = append(r.promotions, clonePromotion(promotion))
+	return nil
+}
+
+func clonePromotions(promotions []domain.Promotion) []domain.Promotion {
+	result := make([]domain.Promotion, len(promotions))
+	for index, promotion := range promotions {
+		result[index] = clonePromotion(promotion)
+	}
+	return result
+}
+
+func clonePromotion(promotion domain.Promotion) domain.Promotion {
+	promotion.Weekdays = append([]time.Weekday(nil), promotion.Weekdays...)
+	promotion.Channels = append([]string(nil), promotion.Channels...)
+	promotion.ApplicableCategories = append([]string(nil), promotion.ApplicableCategories...)
+	return promotion
 }
 
 func seedPromotions() []domain.Promotion {

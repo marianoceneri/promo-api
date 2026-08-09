@@ -22,10 +22,11 @@ func main() {
 	}
 
 	repo := repository.NewMemoryPromotionRepository()
+	promotionService := service.NewPromotionService(repo)
 	quoteService := service.NewQuoteService(repo)
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           httpapi.NewHandler(repo, quoteService),
+		Handler:           httpapi.NewHandler(repo, promotionService, quoteService),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -14,16 +14,46 @@ import (
 
 type Handler struct {
 	promotions repository.PromotionRepository
+	admin      *service.PromotionService
 	quotes     *service.QuoteService
 }
 
-func NewHandler(promotions repository.PromotionRepository, quotes *service.QuoteService) http.Handler {
-	handler := &Handler{promotions: promotions, quotes: quotes}
+func NewHandler(promotions repository.PromotionRepository, admin *service.PromotionService, quotes *service.QuoteService) http.Handler {
+	handler := &Handler{promotions: promotions, admin: admin, quotes: quotes}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handler.health)
 	mux.HandleFunc("GET /v1/promotions", handler.listPromotions)
+	mux.HandleFunc("POST /v1/promotions", handler.createPromotion)
 	mux.HandleFunc("POST /v1/quotes", handler.createQuote)
 	return mux
+}
+
+func (h *Handler) createPromotion(writer http.ResponseWriter, request *http.Request) {
+	decoder := json.NewDecoder(io.LimitReader(request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	var promotion domain.Promotion
+	if err := decoder.Decode(&promotion); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		writeError(writer, http.StatusBadRequest, "body must contain one JSON object")
+		return
+	}
+
+	created, err := h.admin.Create(request.Context(), promotion)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidPromotion):
+			writeError(writer, http.StatusBadRequest, err.Error())
+		case errors.Is(err, repository.ErrPromotionExists):
+			writeError(writer, http.StatusConflict, "promotion id already exists")
+		default:
+			writeError(writer, http.StatusInternalServerError, "could not create promotion")
+		}
+		return
+	}
+	writeJSON(writer, http.StatusCreated, created)
 }
 
 func (h *Handler) health(writer http.ResponseWriter, _ *http.Request) {

@@ -26,8 +26,28 @@ PORT=9090 go run ./cmd/api
 
 - `GET /health` returns service health.
 - `GET /v1/promotions` lists the seeded promotion definitions.
+- `POST /v1/promotions` creates an administrative promotion that becomes
+  immediately available in the in-memory catalog.
 - `POST /v1/quotes` evaluates every promotion and returns the selected discounts
   together with rejection reasons for non-eligible promotions.
+
+Example administrative creation (`weekdays`: Sunday `0` through Saturday `6`):
+
+```bash
+curl -s http://localhost:8080/v1/promotions \
+  -H 'content-type: application/json' \
+  -d '{
+    "id": "FLASH15", "name": "Flash 15%",
+    "starts_at": "2026-08-01T00:00:00-03:00",
+    "ends_at": "2026-09-01T00:00:00-03:00",
+    "timezone": "America/Argentina/Buenos_Aires",
+    "daily_start": "00:00", "daily_end": "00:00",
+    "weekdays": [0, 1, 2, 3, 4, 5, 6],
+    "minimum_subtotal_cents": 10000,
+    "percent_off": 15, "maximum_discount_cents": 5000,
+    "channels": ["web"], "stackable": true, "priority": 10
+  }'
+```
 
 Example quote:
 
@@ -70,5 +90,5 @@ internal/httpapi        REST transport and request validation
 
 This is a deterministic engineering fixture, not a production commerce API. It
 uses fixed August 2026 seed data and in-memory storage. Authentication,
-persistence, administrative mutation, observability and distributed-system
+durable persistence, observability and distributed-system
 concerns are deliberately outside its current scope.
