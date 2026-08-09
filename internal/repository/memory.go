@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"example.com/promo-api/internal/domain"
+	"github.com/marianoceneri/promo-api/internal/domain"
 )
 
 type PromotionRepository interface {

@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"example.com/promo-api/internal/httpapi"
-	"example.com/promo-api/internal/repository"
-	"example.com/promo-api/internal/service"
+	"github.com/marianoceneri/promo-api/internal/httpapi"
+	"github.com/marianoceneri/promo-api/internal/repository"
+	"github.com/marianoceneri/promo-api/internal/service"
 )
 
 func main() {

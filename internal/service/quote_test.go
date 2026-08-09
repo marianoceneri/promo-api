@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"example.com/promo-api/internal/domain"
-	"example.com/promo-api/internal/repository"
-	"example.com/promo-api/internal/service"
+	"github.com/marianoceneri/promo-api/internal/domain"
+	"github.com/marianoceneri/promo-api/internal/repository"
+	"github.com/marianoceneri/promo-api/internal/service"
 )
 
 func TestWeekdayPromotionAppliesWithCap(t *testing.T) {

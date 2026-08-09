@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"example.com/promo-api/internal/domain"
-	"example.com/promo-api/internal/repository"
+	"github.com/marianoceneri/promo-api/internal/domain"
+	"github.com/marianoceneri/promo-api/internal/repository"
 )
 
 var ErrInvalidQuote = errors.New("invalid quote request")
