@@ -1,0 +1,122 @@
+version: "0.2"
+kind: application_contract
+status: proposal
+proposal_id: sha256:af4dd07570b20d8ff3fbb608a7089e4e7ca273501297b0551533d94fa2e0e7a9
+source_contract_id: sha256:425d77b058b10b51729b495d316a593de409d7dedfd8f8245ebed1c9de1e6fae
+proposed_contract_id: sha256:954e81984909d7ed1361e98559189b25138da9925faa21a6942232f9056336f1
+proposed_by: marianoceneri
+rationale: Vincular cada operación generada con el evento del contrato operacional para hacer observable su ejecución.
+created_at: 2026-08-09T22:21:21.280Z
+impact:
+  entities_added: []
+  entities_removed: []
+  entities_modified: []
+  operations_added: []
+  operations_removed: []
+  operations_modified:
+    - CheckPromotionValidity
+    - CreatePromotion
+    - GetPromotion
+    - ListPromotions
+    - UpdatePromotion
+  policies_added: []
+  policies_removed: []
+  flows_added: []
+  flows_removed: []
+contract:
+  version: "0.2"
+  name: promo-api
+  target:
+    kind: go-rest
+    module: github.com/marianoceneri/promo-api
+    port: 8080
+  entities:
+    - name: Promotion
+      plural: promotions
+      id_field: id
+      storage: memory
+      fields:
+        - name: id
+          type: string
+          required: true
+          immutable: true
+        - name: name
+          type: string
+          required: true
+          immutable: false
+        - name: starts_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: ends_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: installments
+          type: integer
+          required: true
+          immutable: false
+          minimum: 1
+          maximum: 60
+        - name: discount_percent
+          type: integer
+          required: true
+          immutable: false
+          minimum: 0
+          maximum: 100
+        - name: enabled
+          type: boolean
+          required: true
+          immutable: false
+  operations:
+    - id: CreatePromotion
+      kind: create
+      entity: Promotion
+      method: POST
+      path: /v1/promotions
+      emits: PromocionCreada
+    - id: UpdatePromotion
+      kind: update
+      entity: Promotion
+      method: PUT
+      path: /v1/promotions/{id}
+      emits: PromocionActualizada
+    - id: GetPromotion
+      kind: get
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}
+      emits: PromocionConsultada
+    - id: ListPromotions
+      kind: list
+      entity: Promotion
+      method: GET
+      path: /v1/promotions
+      emits: CatalogoConsultado
+    - id: CheckPromotionValidity
+      kind: evaluate_validity
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}/validity
+      emits: VigenciaConsultada
+  policies:
+    - id: PromotionValidity
+      kind: active_between
+      entity: Promotion
+      start_field: starts_at
+      end_field: ends_at
+      enabled_field: enabled
+      inclusive_start: true
+      exclusive_end: true
+  flows:
+    - name: CatalogManagement
+      purpose: Crear y modificar promociones administradas.
+      operations:
+        - CreatePromotion
+        - UpdatePromotion
+    - name: AuthorizationSupport
+      purpose: Informar vigencia, cuotas y descuento al equipo autorizador.
+      operations:
+        - GetPromotion
+        - ListPromotions
+        - CheckPromotionValidity

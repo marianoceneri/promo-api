@@ -1,0 +1,121 @@
+version: "0.2"
+kind: application_contract
+status: proposal
+proposal_id: sha256:cad185b1c03d5429805afd84f16ff5d9f2e58e0620ea0e353b9098644fe648bb
+source_contract_id: none
+proposed_contract_id: sha256:425d77b058b10b51729b495d316a593de409d7dedfd8f8245ebed1c9de1e6fae
+proposed_by: marianoceneri
+rationale: Transformar el simulador de carritos en un gestor de promociones para soporte transaccional, según la solicitud explícita del operador.
+created_at: 2026-08-09T22:15:11.992Z
+impact:
+  entities_added:
+    - Promotion
+  entities_removed: []
+  entities_modified: []
+  operations_added:
+    - CheckPromotionValidity
+    - CreatePromotion
+    - GetPromotion
+    - ListPromotions
+    - UpdatePromotion
+  operations_removed: []
+  operations_modified: []
+  policies_added:
+    - PromotionValidity
+  policies_removed: []
+  flows_added:
+    - AuthorizationSupport
+    - CatalogManagement
+  flows_removed: []
+contract:
+  version: "0.2"
+  name: promo-api
+  target:
+    kind: go-rest
+    module: github.com/marianoceneri/promo-api
+    port: 8080
+  entities:
+    - name: Promotion
+      plural: promotions
+      id_field: id
+      storage: memory
+      fields:
+        - name: id
+          type: string
+          required: true
+          immutable: true
+        - name: name
+          type: string
+          required: true
+          immutable: false
+        - name: starts_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: ends_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: installments
+          type: integer
+          required: true
+          immutable: false
+          minimum: 1
+          maximum: 60
+        - name: discount_percent
+          type: integer
+          required: true
+          immutable: false
+          minimum: 0
+          maximum: 100
+        - name: enabled
+          type: boolean
+          required: true
+          immutable: false
+  operations:
+    - id: CreatePromotion
+      kind: create
+      entity: Promotion
+      method: POST
+      path: /v1/promotions
+    - id: UpdatePromotion
+      kind: update
+      entity: Promotion
+      method: PUT
+      path: /v1/promotions/{id}
+    - id: GetPromotion
+      kind: get
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}
+    - id: ListPromotions
+      kind: list
+      entity: Promotion
+      method: GET
+      path: /v1/promotions
+    - id: CheckPromotionValidity
+      kind: evaluate_validity
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}/validity
+  policies:
+    - id: PromotionValidity
+      kind: active_between
+      entity: Promotion
+      start_field: starts_at
+      end_field: ends_at
+      enabled_field: enabled
+      inclusive_start: true
+      exclusive_end: true
+  flows:
+    - name: CatalogManagement
+      purpose: Crear y modificar promociones administradas.
+      operations:
+        - CreatePromotion
+        - UpdatePromotion
+    - name: AuthorizationSupport
+      purpose: Informar vigencia, cuotas y descuento al equipo autorizador.
+      operations:
+        - GetPromotion
+        - ListPromotions
+        - CheckPromotionValidity

@@ -1,13 +1,16 @@
 schema_version: "0.1"
 bounded_context: promotions
 perspective: business
-purpose: Definir la elegibilidad, selección, acumulación y aplicación de promociones sobre un carrito.
+purpose: Gestionar el catálogo de promociones y responder consultas del equipo de autorizaciones sobre vigencia y características.
 includes:
-  - evaluación de elegibilidad de cada promoción
-  - cálculo y límites de descuentos
-  - selección entre promociones acumulables y exclusivas
-  - motivos de rechazo de promociones
+  - alta administrativa de promociones con activación inmediata
+  - modificación y consulta del catálogo
+  - evaluación de vigencia para una fecha y hora determinada
+  - cuotas y porcentaje de descuento como características consultables
 excludes:
+  - cotización y aplicación de descuentos sobre carritos
+  - selección o acumulación de promociones
+  - autorización de transacciones
   - validación del protocolo HTTP
   - serialización y formato JSON
   - códigos de estado de la API

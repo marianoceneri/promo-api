@@ -1,0 +1,68 @@
+version: "0.1"
+status: proposal
+proposal_id: sha256:bd32d9063f7f2fedf5b53f917e0de4167045b2e8f88b97a87360fbbe33b2b863
+source_contract_id: sha256:cc17de16c38ccc94fd8a2fe7e2d790f52e83ed1c6aa357efbc268934f0482ae9
+proposed_contract_id: sha256:3de4538916b00dfd1a200963b4a709db01098c5677a3f9a89bf3e2cd7582596e
+proposed_by: marianoceneri
+rationale: Reemplazar el flujo de cotización de carritos por gestión de catálogo y consulta de vigencia para soporte transaccional.
+created_at: 2026-08-09T22:15:43.128Z
+impact:
+  events_added:
+    - CatalogoConsultado
+    - PromocionActualizada
+    - PromocionConsultada
+    - PromocionCreada
+    - VigenciaConsultada
+  events_removed:
+    - CarritoPresentadoParaEvaluacion
+    - CotizacionPromocionalCalculada
+    - PromocionAplicada
+    - PromocionDeterminadaElegible
+    - PromocionEvaluada
+    - PromocionRechazada
+  rules_added: []
+  rules_removed:
+    - CR-005
+  rules_modified:
+    - CR-001
+    - CR-002
+    - CR-003
+    - CR-004
+contract:
+  version: "0.1"
+  name: promotion-management-operational-contract
+  vocabulary:
+    events:
+      - PromocionCreada
+      - PromocionActualizada
+      - PromocionConsultada
+      - CatalogoConsultado
+      - VigenciaConsultada
+  rules:
+    - id: CR-001
+      description: Una promoción solo puede incorporarse una vez al catálogo por identificador.
+      correlate_by:
+        - promotion_id
+      kind: unique
+      event: PromocionCreada
+    - id: CR-002
+      description: Una promoción solo puede modificarse después de haber sido creada.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionActualizada
+      required: PromocionCreada
+    - id: CR-003
+      description: Las características de una promoción solo pueden consultarse después de incorporarla al catálogo.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionConsultada
+      required: PromocionCreada
+    - id: CR-004
+      description: La vigencia de una promoción solo puede evaluarse después de incorporarla al catálogo.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: VigenciaConsultada
+      required: PromocionCreada

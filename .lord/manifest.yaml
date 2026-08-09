@@ -1,7 +1,5 @@
 version: "0.1"
 scope: scope.yaml
 contract: contract.yaml
-discovery: discovery.json
-decisions: decisions.yaml
-refinement: refinement.json
 aliases: aliases.yaml
+application: application.yaml

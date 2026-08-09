@@ -1,0 +1,96 @@
+version: "0.2"
+name: promo-api
+target:
+  kind: go-rest
+  module: github.com/marianoceneri/promo-api
+  port: 8080
+entities:
+  - name: Promotion
+    plural: promotions
+    id_field: id
+    storage: memory
+    fields:
+      - name: id
+        type: string
+        required: true
+        immutable: true
+      - name: name
+        type: string
+        required: true
+        immutable: false
+      - name: starts_at
+        type: datetime
+        required: true
+        immutable: false
+      - name: ends_at
+        type: datetime
+        required: true
+        immutable: false
+      - name: installments
+        type: integer
+        required: true
+        immutable: false
+        minimum: 1
+        maximum: 60
+      - name: discount_percent
+        type: integer
+        required: true
+        immutable: false
+        minimum: 0
+        maximum: 100
+      - name: enabled
+        type: boolean
+        required: true
+        immutable: false
+operations:
+  - id: CreatePromotion
+    kind: create
+    entity: Promotion
+    method: POST
+    path: /v1/promotions
+    emits: PromocionCreada
+  - id: UpdatePromotion
+    kind: update
+    entity: Promotion
+    method: PUT
+    path: /v1/promotions/{id}
+    emits: PromocionActualizada
+  - id: GetPromotion
+    kind: get
+    entity: Promotion
+    method: GET
+    path: /v1/promotions/{id}
+    emits: PromocionConsultada
+  - id: ListPromotions
+    kind: list
+    entity: Promotion
+    method: GET
+    path: /v1/promotions
+    emits: CatalogoConsultado
+  - id: CheckPromotionValidity
+    kind: evaluate_validity
+    entity: Promotion
+    method: GET
+    path: /v1/promotions/{id}/validity
+    emits: VigenciaConsultada
+policies:
+  - id: PromotionValidity
+    kind: active_between
+    entity: Promotion
+    start_field: starts_at
+    end_field: ends_at
+    enabled_field: enabled
+    inclusive_start: true
+    exclusive_end: true
+flows:
+  - name: CatalogManagement
+    purpose: Crear y modificar promociones administradas.
+    operations:
+      - CreatePromotion
+      - UpdatePromotion
+  - name: AuthorizationSupport
+    purpose: Informar vigencia, cuotas y descuento al equipo autorizador.
+    operations:
+      - GetPromotion
+      - ListPromotions
+      - CheckPromotionValidity
