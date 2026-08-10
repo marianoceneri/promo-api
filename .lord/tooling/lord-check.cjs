@@ -21890,7 +21890,7 @@ function alignApplicationWithOperationalContract(application, operational) {
   const outside = [...emitted].filter((event) => !vocabulary.has(event)).sort();
   const requiredCorrelations = operational.rules.reduce((result, rule) => {
     if (!rule.correlate_by?.length) return result;
-    const events = rule.kind === "unique" ? [rule.event] : rule.kind === "only_after" ? [rule.event, rule.required] : rule.kind === "obliges" ? [rule.trigger, rule.target] : rule.kind === "prohibits_after" ? [rule.trigger, rule.prohibited] : [];
+    const events = rule.kind === "unique" ? [rule.event] : rule.kind === "only_after" ? [rule.event, rule.required] : rule.kind === "obliges" ? [rule.trigger, rule.target] : rule.kind === "prohibits_after" ? [rule.trigger, rule.prohibited] : rule.kind === "alternates" ? [rule.trigger, rule.target] : rule.kind === "prohibits_between" ? [rule.trigger, rule.target, rule.prohibited] : [];
     for (const event of events) {
       const keys = result.get(event) ?? /* @__PURE__ */ new Set();
       rule.correlate_by.forEach((key) => keys.add(key));
@@ -22016,6 +22016,12 @@ function validateRule(value, index, vocabulary) {
     case "prohibits_after":
       rule = { ...base, kind: value.kind, trigger: eventField("trigger"), prohibited: eventField("prohibited") };
       break;
+    case "alternates":
+      rule = { ...base, kind: value.kind, trigger: eventField("trigger"), target: eventField("target") };
+      break;
+    case "prohibits_between":
+      rule = { ...base, kind: value.kind, trigger: eventField("trigger"), target: eventField("target"), prohibited: eventField("prohibited") };
+      break;
     default:
       errors.push(`rules[${index}].kind is unsupported`);
   }
@@ -22063,7 +22069,7 @@ var eventProposalSchema = external_exports.object({
 }).strict();
 var candidateRuleSchema = external_exports.object({
   candidate_id: external_exports.string().min(1),
-  kind: external_exports.enum(["initial", "unique", "only_after", "obliges", "prohibits_after"]),
+  kind: external_exports.enum(["initial", "unique", "only_after", "obliges", "prohibits_after", "alternates", "prohibits_between"]),
   event: external_exports.string().min(1).nullable(),
   required: external_exports.string().min(1).nullable(),
   trigger: external_exports.string().min(1).nullable(),
@@ -22082,7 +22088,9 @@ var candidateRuleSchema = external_exports.object({
     unique: ["event"],
     only_after: ["event", "required"],
     obliges: ["trigger", "target"],
-    prohibits_after: ["trigger", "prohibited"]
+    prohibits_after: ["trigger", "prohibited"],
+    alternates: ["trigger", "target"],
+    prohibits_between: ["trigger", "target", "prohibited"]
   };
   const required2 = new Set(requiredFields[rule.kind]);
   for (const field of ["event", "required", "trigger", "target", "prohibited"]) {
@@ -22288,6 +22296,7 @@ function toCoreRule(candidate) {
         required: requireField(candidate.required, "required", candidate.candidate_id)
       };
     case "obliges":
+    case "alternates":
       return {
         ...base,
         kind: candidate.kind,
@@ -22299,6 +22308,14 @@ function toCoreRule(candidate) {
         ...base,
         kind: candidate.kind,
         trigger: requireField(candidate.trigger, "trigger", candidate.candidate_id),
+        prohibited: requireField(candidate.prohibited, "prohibited", candidate.candidate_id)
+      };
+    case "prohibits_between":
+      return {
+        ...base,
+        kind: candidate.kind,
+        trigger: requireField(candidate.trigger, "trigger", candidate.candidate_id),
+        target: requireField(candidate.target, "target", candidate.candidate_id),
         prohibited: requireField(candidate.prohibited, "prohibited", candidate.candidate_id)
       };
   }
@@ -22411,13 +22428,22 @@ var applicationParameterSchema = external_exports.object({
 var applicationOperationSchema = external_exports.object({
   id: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
   title: external_exports.string().min(1).optional(),
-  kind: external_exports.enum(["create", "update", "get", "list", "evaluate_validity"]),
+  kind: external_exports.enum(["create", "update", "get", "list", "evaluate_validity", "transition"]),
   entity: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
   method: external_exports.enum(["GET", "POST", "PUT"]),
   path: external_exports.string().startsWith("/"),
   emits: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/).optional(),
   correlation: external_exports.record(external_exports.string().regex(/^[a-z][a-z0-9_]*$/), external_exports.string().regex(/^[a-z][a-z0-9_]*$/)).default({}),
-  parameters: external_exports.array(applicationParameterSchema).default([])
+  parameters: external_exports.array(applicationParameterSchema).default([]),
+  transition: external_exports.object({
+    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    from: external_exports.boolean().optional(),
+    to: external_exports.boolean()
+  }).strict().optional(),
+  state_guard: external_exports.object({
+    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    equals: external_exports.boolean()
+  }).strict().optional()
 }).strict();
 var validityPolicySchema = external_exports.object({
   id: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
@@ -22482,10 +22508,24 @@ var applicationContractSchema = external_exports.object({
     if (operation.kind === "list" && Object.keys(operation.correlation).length > 0) {
       context.addIssue({ code: "custom", path: ["operations", index, "correlation"], message: "list operations cannot emit entity-instance correlation" });
     }
-    const expectedMethod = operation.kind === "create" ? "POST" : operation.kind === "update" ? "PUT" : "GET";
+    const expectedMethod = operation.kind === "create" || operation.kind === "transition" ? "POST" : operation.kind === "update" ? "PUT" : "GET";
     if (operation.method !== expectedMethod) context.addIssue({ code: "custom", path: ["operations", index, "method"], message: `${operation.kind} must use ${expectedMethod}` });
-    const needsID = ["update", "get", "evaluate_validity"].includes(operation.kind);
+    const needsID = ["update", "get", "evaluate_validity", "transition"].includes(operation.kind);
     if (needsID !== operation.path.includes("{id}")) context.addIssue({ code: "custom", path: ["operations", index, "path"], message: needsID ? "operation path must contain {id}" : "operation path must not contain {id}" });
+    if (operation.kind === "transition") {
+      if (!operation.transition) context.addIssue({ code: "custom", path: ["operations", index, "transition"], message: "transition operation requires transition semantics" });
+      else if (entity?.fields.find((field) => field.name === operation.transition?.field)?.type !== "boolean") {
+        context.addIssue({ code: "custom", path: ["operations", index, "transition", "field"], message: "transition field must reference a boolean entity field" });
+      }
+    } else if (operation.transition) {
+      context.addIssue({ code: "custom", path: ["operations", index, "transition"], message: "transition semantics are valid only for transition operations" });
+    }
+    if (operation.state_guard) {
+      if (!needsID) context.addIssue({ code: "custom", path: ["operations", index, "state_guard"], message: "state guards require an entity-instance operation" });
+      if (entity?.fields.find((field) => field.name === operation.state_guard?.field)?.type !== "boolean") {
+        context.addIssue({ code: "custom", path: ["operations", index, "state_guard", "field"], message: "state guard field must reference a boolean entity field" });
+      }
+    }
   });
   contract.policies.forEach((policy, index) => {
     const entity = entities.get(policy.entity);
@@ -22652,6 +22692,7 @@ function renderHandlerTests(contract) {
     const create = contract.operations.find((item) => item.entity === entity.name && item.kind === "create");
     const get = contract.operations.find((item) => item.entity === entity.name && item.kind === "get");
     const validity = contract.operations.find((item) => item.entity === entity.name && item.kind === "evaluate_validity");
+    const transitions = contract.operations.filter((item) => item.entity === entity.name && item.kind === "transition");
     if (!create) return [];
     const sample = Object.fromEntries(entity.fields.map((field) => [field.name, sampleValue(field)]));
     const idValue = String(sample[entity.id_field]);
@@ -22679,6 +22720,23 @@ function renderHandlerTests(contract) {
       '	if !result.Valid { t.Fatal("expected generated fixture to be valid") }'
     );
     if (validity?.emits) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(validity.emits)} { t.Fatal("validity check did not emit its contractual event") }`);
+    for (const transition of transitions) {
+      steps.push(
+        `	request = httptest.NewRequest(http.MethodPost, ${JSON.stringify(transition.path.replace("{id}", idValue))}, nil)`,
+        "	response = httptest.NewRecorder()",
+        "	handler.ServeHTTP(response, request)",
+        `	if response.Code != http.StatusOK { t.Fatalf(${JSON.stringify(`${transition.id} status = %d, body = %s`)}, response.Code, response.Body.String()) }`
+      );
+      if (transition.emits) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(transition.emits)} { t.Fatal(${JSON.stringify(`${transition.id} did not emit its contractual event`)}) }`);
+      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "update" && operation.state_guard && operation.state_guard.field === transition.transition?.field && operation.state_guard.equals !== transition.transition?.to)) {
+        steps.push(
+          `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(guarded.path.replace("{id}", idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(sample))})))`,
+          "	response = httptest.NewRecorder()",
+          "	handler.ServeHTTP(response, request)",
+          `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`${guarded.id} after ${transition.id} status = %d, want 409`)}, response.Code) }`
+        );
+      }
+    }
     steps.push(
       '	request = httptest.NewRequest(http.MethodGet, "/_lord/events", nil)',
       "	response = httptest.NewRecorder()",
@@ -22963,6 +23021,7 @@ function renderOperation(contract, operation) {
   const functionName = lowerFirst(operation.id);
   const id = goName(entity.id_field);
   const emit = renderEmit(operation, operation.kind === "list" ? null : "value");
+  if (operation.kind === "update") return renderUpdateOperation(operation, entity, receiver, functionName, id, emit);
   switch (operation.kind) {
     case "create":
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
@@ -22998,6 +23057,19 @@ function renderOperation(contract, operation) {
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, _ *http.Request) {${emit}
 	writeJSON(w, http.StatusOK, map[string]any{"${entity.plural}": ${receiver}.List()})
 }`;
+    case "transition": {
+      if (!operation.transition) throw new Error(`Operation '${operation.id}' has no transition semantics.`);
+      const field = goName(operation.transition.field);
+      const expected = operation.transition.from === void 0 ? "" : `
+	if value.${field} != ${operation.transition.from} { writeError(w, http.StatusConflict, "transition requires ${operation.transition.field}=${operation.transition.from}"); return }`;
+      return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
+	value, err := ${receiver}.Get(r.PathValue("id"))
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${expected}
+	value.${field} = ${operation.transition.to}
+	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not transition ${lowerFirst(entity.name)}"); return }${emit}
+	writeJSON(w, http.StatusOK, value)
+}`;
+    }
     case "evaluate_validity": {
       const policy = contract.policies.find((item) => item.entity === entity.name);
       if (!policy) throw new Error(`Operation '${operation.id}' requires an active_between policy for '${entity.name}'.`);
@@ -23016,6 +23088,23 @@ function renderOperation(contract, operation) {
 }`;
     }
   }
+}
+function renderUpdateOperation(operation, entity, receiver, functionName, id, emit) {
+  const guard = operation.state_guard ? `
+	current, err := ${receiver}.Get(r.PathValue("id"))
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }
+	if current.${goName(operation.state_guard.field)} != ${operation.state_guard.equals} { writeError(w, http.StatusConflict, "operation requires ${operation.state_guard.field}=${operation.state_guard.equals}"); return }` : "";
+  return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {${guard}
+	var value domain.${entity.name}
+	if err := decodeJSON(r, &value); err != nil { writeError(w, http.StatusBadRequest, "invalid JSON body"); return }
+	id := r.PathValue("id")
+	if value.${id} == "" { value.${id} = id }
+	if value.${id} != id { writeError(w, http.StatusBadRequest, "immutable ${entity.id_field} does not match path"); return }
+	apply${entity.name}Defaults(&value)
+	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	if err := ${receiver}.Update(value); err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not update ${lowerFirst(entity.name)}"); return }${emit}
+	writeJSON(w, http.StatusOK, value)
+}`;
 }
 function renderEmit(operation, valueVariable) {
   if (!operation.emits) return "";
