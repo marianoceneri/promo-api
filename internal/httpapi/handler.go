@@ -62,6 +62,16 @@ func (h *Handler) createPromotion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
+	current, err := h.promotions.Get(r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not get promotion")
+		return
+	}
+	_ = current
 	var value domain.Promotion
 	if err := decodeJSON(r, &value); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -81,10 +91,6 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.promotions.Update(value); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not found")
-			return
-		}
 		writeError(w, http.StatusInternalServerError, "could not update promotion")
 		return
 	}
@@ -108,10 +114,11 @@ func (h *Handler) getPromotion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, value)
 }
 
-func (h *Handler) listPromotions(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) listPromotions(w http.ResponseWriter, r *http.Request) {
+	values := h.promotions.List()
 	w.Header().Set("X-LORD-Event", "CatalogoConsultado")
 	h.events.Record("CatalogoConsultado", nil)
-	writeJSON(w, http.StatusOK, map[string]any{"promotions": h.promotions.List()})
+	writeJSON(w, http.StatusOK, map[string]any{"promotions": values})
 }
 
 func (h *Handler) checkPromotionValidity(w http.ResponseWriter, r *http.Request) {

@@ -22423,6 +22423,7 @@ var applicationParameterSchema = external_exports.object({
   in: external_exports.literal("query"),
   type: fieldTypeSchema,
   required: external_exports.boolean().default(false),
+  field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/).optional(),
   description: external_exports.string().min(1).optional()
 }).strict();
 var applicationOperationSchema = external_exports.object({
@@ -22502,12 +22503,21 @@ var applicationContractSchema = external_exports.object({
     const entity = entities.get(operation.entity);
     if (!entity) context.addIssue({ code: "custom", path: ["operations", index, "entity"], message: "operation references an unknown entity" });
     const fields = new Set(entity?.fields.map((field) => field.name) ?? []);
+    const fieldDefinitions = new Map(entity?.fields.map((field) => [field.name, field]) ?? []);
     Object.entries(operation.correlation).forEach(([key, field]) => {
       if (!fields.has(field)) context.addIssue({ code: "custom", path: ["operations", index, "correlation", key], message: "correlation references an unknown entity field" });
     });
     if (operation.kind === "list" && Object.keys(operation.correlation).length > 0) {
       context.addIssue({ code: "custom", path: ["operations", index, "correlation"], message: "list operations cannot emit entity-instance correlation" });
     }
+    operation.parameters.forEach((parameter, parameterIndex) => {
+      if (operation.kind === "list") {
+        if (!parameter.field) context.addIssue({ code: "custom", path: ["operations", index, "parameters", parameterIndex, "field"], message: "list query parameters must declare the entity field they filter" });
+        else if (fieldDefinitions.get(parameter.field)?.type !== parameter.type) context.addIssue({ code: "custom", path: ["operations", index, "parameters", parameterIndex, "field"], message: "list filter type must match its entity field" });
+      } else if (parameter.field) {
+        context.addIssue({ code: "custom", path: ["operations", index, "parameters", parameterIndex, "field"], message: "field mapping is currently supported only for list filters" });
+      }
+    });
     const expectedMethod = operation.kind === "create" || operation.kind === "transition" ? "POST" : operation.kind === "update" ? "PUT" : "GET";
     if (operation.method !== expectedMethod) context.addIssue({ code: "custom", path: ["operations", index, "method"], message: `${operation.kind} must use ${expectedMethod}` });
     const needsID = ["update", "get", "evaluate_validity", "transition"].includes(operation.kind);
@@ -22736,6 +22746,37 @@ function renderHandlerTests(contract) {
           `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`${guarded.id} after ${transition.id} status = %d, want 409`)}, response.Code) }`
         );
       }
+      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "evaluate_validity" && operation.state_guard && operation.state_guard.field === transition.transition?.field && operation.state_guard.equals !== transition.transition?.to)) {
+        const instant = guarded.parameters.find((parameter) => parameter.type === "datetime" && parameter.required);
+        steps.push(
+          `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${guarded.path.replace("{id}", idValue)}?${instant.name}=2030-06-01T00%3A00%3A00Z`)}, nil)`,
+          "	response = httptest.NewRecorder()",
+          "	handler.ServeHTTP(response, request)",
+          `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`${guarded.id} after ${transition.id} status = %d, want 409`)}, response.Code) }`
+        );
+      }
+      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "get" && operation.state_guard && operation.state_guard.field === transition.transition?.field && operation.state_guard.equals !== transition.transition?.to)) {
+        steps.push(
+          `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(guarded.path.replace("{id}", idValue))}, nil)`,
+          "	response = httptest.NewRecorder()",
+          "	handler.ServeHTTP(response, request)",
+          `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`${guarded.id} after ${transition.id} status = %d, want 409`)}, response.Code) }`
+        );
+      }
+      for (const listing of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "list")) {
+        for (const parameter of listing.parameters.filter((item) => item.field === transition.transition?.field)) {
+          steps.push(
+            `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${listing.path}?${parameter.name}=${String(transition.transition?.to)}`)}, nil)`,
+            "	response = httptest.NewRecorder()",
+            "	handler.ServeHTTP(response, request)",
+            `	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), ${JSON.stringify(idValue)}) { t.Fatalf(${JSON.stringify(`${listing.id} matching filter did not return transitioned entity: %s`)}, response.Body.String()) }`,
+            `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${listing.path}?${parameter.name}=${String(!transition.transition?.to)}`)}, nil)`,
+            "	response = httptest.NewRecorder()",
+            "	handler.ServeHTTP(response, request)",
+            `	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), ${JSON.stringify(idValue)}) { t.Fatalf(${JSON.stringify(`${listing.id} opposite filter returned transitioned entity: %s`)}, response.Body.String()) }`
+          );
+        }
+      }
     }
     steps.push(
       '	request = httptest.NewRequest(http.MethodGet, "/_lord/events", nil)',
@@ -22758,9 +22799,12 @@ ${steps.join("\n")}
       if (field.type === "integer" && (field.minimum !== void 0 || field.maximum !== void 0)) {
         blocks.push(renderIntegerBoundaryTest(entity, create, field, stores));
       }
+      const update = contract.operations.find((operation) => operation.entity === entity.name && operation.kind === "update");
+      if (update && field.immutable && field.name !== entity.id_field) blocks.push(renderImmutableFieldTest(entity, create, update, field, stores));
     }
     return blocks;
   }).join("\n\n");
+  const stringImport = contract.operations.some((operation) => operation.kind === "list" && operation.parameters.length > 0) ? '\n	"strings"' : "";
   return `// Code generated by LORD. DO NOT EDIT.
 package httpapi
 
@@ -22768,7 +22812,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
+	"net/http/httptest"${stringImport}
 	"testing"
 
 	"${contract.target.module}/internal/store"
@@ -22776,6 +22820,22 @@ import (
 
 ${tests}
 `;
+}
+function renderImmutableFieldTest(entity, create, update, field, stores) {
+  const original = Object.fromEntries(entity.fields.map((item) => [item.name, sampleValue(item)]));
+  const idValue = String(original[entity.id_field]);
+  const changed = { ...original, [field.name]: changedSampleValue(field, original[field.name]) };
+  return `func Test${entity.name}${goName(field.name)}IsImmutable(t *testing.T) {
+	handler := NewHandler(${stores})
+	request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(original))})))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated { t.Fatalf("create status = %d", response.Code) }
+	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(update.path.replace("{id}", idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(changed))})))
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict { t.Fatalf("immutable update status = %d, want 409", response.Code) }
+}`;
 }
 function renderIntegerBoundaryTest(entity, create, field, stores) {
   const base = Object.fromEntries(entity.fields.map((item) => [item.name, sampleValue(item)]));
@@ -22818,6 +22878,12 @@ function sampleValue(field) {
   if (field.type === "integer") return Math.max(field.minimum ?? 1, 1);
   if (field.enum) return field.enum[0];
   return `${field.name}-test`;
+}
+function changedSampleValue(field, current) {
+  if (field.type === "boolean") return !current;
+  if (field.type === "integer") return Number(current) + 1;
+  if (field.type === "datetime") return "2030-02-01T00:00:00Z";
+  return `${String(current)}-changed`;
 }
 function renderMain(contract) {
   const stores = contract.entities.map((entity) => `${lowerFirst(entity.name)}Store := store.New${entity.name}Store()`).join("\n	");
@@ -22967,7 +23033,8 @@ function renderHandler(contract) {
   const standardImports = ["encoding/json", "errors", "io", "net/http"];
   if (contract.entities.some((entity) => entity.fields.some((field) => field.minimum !== void 0 || field.maximum !== void 0))) standardImports.push("fmt");
   if (contract.entities.some((entity) => entity.fields.some((field) => field.required && field.type === "string"))) standardImports.push("strings");
-  if (contract.operations.some((operation) => operation.kind === "evaluate_validity")) standardImports.push("time");
+  if (contract.operations.some((operation) => operation.kind === "evaluate_validity" || operation.kind === "list" && operation.parameters.some((parameter) => parameter.type === "datetime"))) standardImports.push("time");
+  if (contract.operations.some((operation) => operation.kind === "list" && operation.parameters.some((parameter) => parameter.type === "boolean" || parameter.type === "integer"))) standardImports.push("strconv");
   standardImports.sort();
   const imports = standardImports.map((item) => `	"${item}"`).join("\n");
   return `// Code generated by LORD. DO NOT EDIT.
@@ -23021,7 +23088,10 @@ function renderOperation(contract, operation) {
   const functionName = lowerFirst(operation.id);
   const id = goName(entity.id_field);
   const emit = renderEmit(operation, operation.kind === "list" ? null : "value");
-  if (operation.kind === "update") return renderUpdateOperation(operation, entity, receiver, functionName, id, emit);
+  if (operation.kind === "update") return renderGovernedUpdateOperation(operation, entity, receiver, functionName, id, emit);
+  if (operation.kind === "get") return renderGetOperation(operation, entity, receiver, functionName, emit);
+  if (operation.kind === "list") return renderListOperation(operation, entity, receiver, functionName, emit);
+  if (operation.kind === "evaluate_validity") return renderValidityOperation(contract, operation, entity, receiver, functionName, id, emit);
   switch (operation.kind) {
     case "create":
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
@@ -23089,22 +23159,86 @@ function renderOperation(contract, operation) {
     }
   }
 }
-function renderUpdateOperation(operation, entity, receiver, functionName, id, emit) {
+function renderGovernedUpdateOperation(operation, entity, receiver, functionName, id, emit) {
   const guard = operation.state_guard ? `
+	if current.${goName(operation.state_guard.field)} != ${operation.state_guard.equals} { writeError(w, http.StatusConflict, "operation requires ${operation.state_guard.field}=${operation.state_guard.equals}"); return }` : "\n	_ = current";
+  const immutableChecks = entity.fields.filter((field) => field.immutable && field.name !== entity.id_field).map((field) => {
+    const name = goName(field.name);
+    const changed = field.type === "datetime" ? `!current.${name}.Equal(value.${name})` : `current.${name} != value.${name}`;
+    return `
+	if ${changed} { writeError(w, http.StatusConflict, "${field.name} is immutable"); return }`;
+  }).join("");
+  return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	current, err := ${receiver}.Get(r.PathValue("id"))
-	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }
-	if current.${goName(operation.state_guard.field)} != ${operation.state_guard.equals} { writeError(w, http.StatusConflict, "operation requires ${operation.state_guard.field}=${operation.state_guard.equals}"); return }` : "";
-  return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {${guard}
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${guard}
 	var value domain.${entity.name}
 	if err := decodeJSON(r, &value); err != nil { writeError(w, http.StatusBadRequest, "invalid JSON body"); return }
 	id := r.PathValue("id")
 	if value.${id} == "" { value.${id} = id }
-	if value.${id} != id { writeError(w, http.StatusBadRequest, "immutable ${entity.id_field} does not match path"); return }
+	if value.${id} != id { writeError(w, http.StatusBadRequest, "immutable ${entity.id_field} does not match path"); return }${immutableChecks}
 	apply${entity.name}Defaults(&value)
 	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
-	if err := ${receiver}.Update(value); err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not update ${lowerFirst(entity.name)}"); return }${emit}
+	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not update ${lowerFirst(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
+}
+function renderGetOperation(operation, entity, receiver, functionName, emit) {
+  const guard = renderLoadedStateGuard(operation, "value");
+  return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
+	value, err := ${receiver}.Get(r.PathValue("id"))
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${guard}${emit}
+	writeJSON(w, http.StatusOK, value)
+}`;
+}
+function renderListOperation(operation, entity, receiver, functionName, emit) {
+  const filters = operation.parameters.map((parameter, index) => {
+    const raw = `raw${index}`;
+    const parsed = `filter${index}`;
+    const field = goName(parameter.field);
+    const required2 = parameter.required ? `
+	if ${raw} == "" { writeError(w, http.StatusBadRequest, "${parameter.name} is required"); return }` : "";
+    const parse3 = parameter.type === "boolean" ? `
+	${parsed}, err := strconv.ParseBool(${raw})
+	if err != nil { writeError(w, http.StatusBadRequest, "${parameter.name} must be a boolean"); return }` : parameter.type === "integer" ? `
+	${parsed}, err := strconv.ParseInt(${raw}, 10, 64)
+	if err != nil { writeError(w, http.StatusBadRequest, "${parameter.name} must be an integer"); return }` : parameter.type === "datetime" ? `
+	${parsed}, err := time.Parse(time.RFC3339, ${raw})
+	if err != nil { writeError(w, http.StatusBadRequest, "${parameter.name} must be an RFC3339 timestamp"); return }` : `
+	${parsed} := ${raw}`;
+    const comparison = parameter.type === "datetime" ? `value.${field}.Equal(${parsed})` : `value.${field} == ${parsed}`;
+    return `
+	${raw} := r.URL.Query().Get("${parameter.name}")${required2}
+	if ${raw} != "" {${parse3}
+		filtered := values[:0]
+		for _, value := range values { if ${comparison} { filtered = append(filtered, value) } }
+		values = filtered
+	}`;
+  }).join("");
+  return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
+	values := ${receiver}.List()${filters}${emit}
+	writeJSON(w, http.StatusOK, map[string]any{"${entity.plural}": values})
+}`;
+}
+function renderValidityOperation(contract, operation, entity, receiver, functionName, id, emit) {
+  const policy = contract.policies.find((item) => item.entity === entity.name);
+  if (!policy) throw new Error(`Operation '${operation.id}' requires an active_between policy for '${entity.name}'.`);
+  const instant = operation.parameters.find((parameter) => parameter.in === "query" && parameter.type === "datetime" && parameter.required);
+  if (!instant) throw new Error(`Operation '${operation.id}' requires one datetime query parameter.`);
+  const enabled = policy.enabled_field ? ` && value.${goName(policy.enabled_field)}` : "";
+  const guard = renderLoadedStateGuard(operation, "value");
+  return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
+	value, err := ${receiver}.Get(r.PathValue("id"))
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${guard}
+	evaluatedAt, err := time.Parse(time.RFC3339, r.URL.Query().Get("${instant.name}"))
+	if err != nil { writeError(w, http.StatusBadRequest, "${instant.name} must be an RFC3339 timestamp"); return }
+	valid := !evaluatedAt.Before(value.${goName(policy.start_field)}) && evaluatedAt.Before(value.${goName(policy.end_field)})${enabled}${emit}
+	writeJSON(w, http.StatusOK, map[string]any{"id": value.${id}, "valid": valid, "${instant.name}": evaluatedAt, "characteristics": value})
+}`;
+}
+function renderLoadedStateGuard(operation, valueVariable) {
+  if (!operation.state_guard) return "";
+  return `
+	if ${valueVariable}.${goName(operation.state_guard.field)} != ${operation.state_guard.equals} { writeError(w, http.StatusConflict, "operation requires ${operation.state_guard.field}=${operation.state_guard.equals}"); return }`;
 }
 function renderEmit(operation, valueVariable) {
   if (!operation.emits) return "";
