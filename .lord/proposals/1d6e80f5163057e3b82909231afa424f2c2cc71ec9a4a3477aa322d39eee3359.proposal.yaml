@@ -1,0 +1,90 @@
+version: "0.1"
+status: proposal
+proposal_id: sha256:1d6e80f5163057e3b82909231afa424f2c2cc71ec9a4a3477aa322d39eee3359
+source_contract_id: sha256:3de4538916b00dfd1a200963b4a709db01098c5677a3f9a89bf3e2cd7582596e
+proposed_contract_id: sha256:1fb3d8fab55cf1fc01d7a8278dd30b152d40fb460b6c97dddde63f4a657f73a8
+proposed_by: marianoceneri
+rationale: "Derivado de la negociación de aplicación sha256:4ea982097b9e70c8364e8644c3c13a234ae6249c51d2104bdca691168f30ae05 (4 decisiones ratificadas): incorporar la baja lógica de promociones como capacidad explícita, reversible mediante rehabilitación dedicada, prohibiendo modificación y evaluación de vigencia mientras la promoción esté dada de baja. Agrega los eventos PromocionDadaDeBaja y PromocionRehabilitada y las reglas CR-005 (baja solo después del alta), CR-006 (alternancia baja/rehabilitación por promotion_id), CR-007 y CR-008 (prohibición de modificar y de evaluar vigencia dentro del intervalo de baja). Analizado con Z3 (bound 12): conjunto consistente, sin eventos muertos."
+created_at: 2026-08-11T14:47:32.157Z
+impact:
+  events_added:
+    - PromocionDadaDeBaja
+    - PromocionRehabilitada
+  events_removed: []
+  rules_added:
+    - CR-005
+    - CR-006
+    - CR-007
+    - CR-008
+  rules_removed: []
+  rules_modified: []
+contract:
+  version: "0.1"
+  name: promotion-management-operational-contract
+  vocabulary:
+    events:
+      - PromocionCreada
+      - PromocionActualizada
+      - PromocionConsultada
+      - CatalogoConsultado
+      - VigenciaConsultada
+      - PromocionDadaDeBaja
+      - PromocionRehabilitada
+  rules:
+    - id: CR-001
+      description: Una promoción solo puede incorporarse una vez al catálogo por identificador.
+      correlate_by:
+        - promotion_id
+      kind: unique
+      event: PromocionCreada
+    - id: CR-002
+      description: Una promoción solo puede modificarse después de haber sido creada.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionActualizada
+      required: PromocionCreada
+    - id: CR-003
+      description: Las características de una promoción solo pueden consultarse después de incorporarla al catálogo.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionConsultada
+      required: PromocionCreada
+    - id: CR-004
+      description: La vigencia de una promoción solo puede evaluarse después de incorporarla al catálogo.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: VigenciaConsultada
+      required: PromocionCreada
+    - id: CR-005
+      description: Una promoción solo puede darse de baja después de haber sido incorporada al catálogo.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionDadaDeBaja
+      required: PromocionCreada
+    - id: CR-006
+      description: Baja y rehabilitación de una promoción deben alternar, comenzando por la baja.
+      correlate_by:
+        - promotion_id
+      kind: alternates
+      trigger: PromocionDadaDeBaja
+      target: PromocionRehabilitada
+    - id: CR-007
+      description: Una promoción dada de baja no puede modificarse hasta que sea rehabilitada.
+      correlate_by:
+        - promotion_id
+      kind: prohibits_between
+      trigger: PromocionDadaDeBaja
+      target: PromocionRehabilitada
+      prohibited: PromocionActualizada
+    - id: CR-008
+      description: La vigencia de una promoción dada de baja no puede evaluarse hasta que sea rehabilitada.
+      correlate_by:
+        - promotion_id
+      kind: prohibits_between
+      trigger: PromocionDadaDeBaja
+      target: PromocionRehabilitada
+      prohibited: VigenciaConsultada

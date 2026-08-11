@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: application_contract_approval
+approval_id: sha256:727f8b0dc2643908eb7270292038f8fb5c8d354c3eadaf3cedb24eba0c89de27
+proposal_id: sha256:1f2c51281964bc51b3d24f600a9db35d5be99592ca389c6909d8de052c717c5f
+source_contract_id: sha256:1d64b2472889e32cd56eafaf8b4b15add3eba06f3da241f702103d43033f2b73
+contract_id: sha256:566bb9fd1216b09c973fb45102375a522df9c0719ecaa3be0b2f7c3350e16afc
+approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 3)"
+approved_at: 2026-08-11T14:52:53.751Z
+rationale: "Auditada contra la negociación sha256:47b30914… (6 decisiones ratificadas): transiciones dedicadas con eventos propios, guardas de estado en Update y CheckValidity, filtro tipado en el listado, enabled immutable (bypass cerrado) y precondición temporal en EnablePromotion (vencidas no rehabilitables). Alineada con el contrato operacional activo sha256:1fb3d8fa…."

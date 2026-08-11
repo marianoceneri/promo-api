@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: operational_contract_approval
+approval_id: sha256:5c6230717353fddcf70b12afe7d35018079c62d130d358283d10602db57808b8
+proposal_id: sha256:1d6e80f5163057e3b82909231afa424f2c2cc71ec9a4a3477aa322d39eee3359
+source_contract_id: sha256:3de4538916b00dfd1a200963b4a709db01098c5677a3f9a89bf3e2cd7582596e
+contract_id: sha256:1fb3d8fab55cf1fc01d7a8278dd30b152d40fb460b6c97dddde63f4a657f73a8
+approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 3)"
+approved_at: 2026-08-11T14:50:57.561Z
+rationale: "Revisada contra la negociación de bajas: CR-005 (only_after), CR-006 (alternates), CR-007/CR-008 (prohibits_between) reflejan exactamente las decisiones ratificadas, correlacionadas por promotion_id. Z3 consistente sin eventos muertos."

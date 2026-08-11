@@ -7,6 +7,8 @@ vocabulary:
     - PromocionConsultada
     - CatalogoConsultado
     - VigenciaConsultada
+    - PromocionDadaDeBaja
+    - PromocionRehabilitada
 rules:
   - id: CR-001
     description: Una promoción solo puede incorporarse una vez al catálogo por identificador.
@@ -35,3 +37,33 @@ rules:
     kind: only_after
     event: VigenciaConsultada
     required: PromocionCreada
+  - id: CR-005
+    description: Una promoción solo puede darse de baja después de haber sido incorporada al catálogo.
+    correlate_by:
+      - promotion_id
+    kind: only_after
+    event: PromocionDadaDeBaja
+    required: PromocionCreada
+  - id: CR-006
+    description: Baja y rehabilitación de una promoción deben alternar, comenzando por la baja.
+    correlate_by:
+      - promotion_id
+    kind: alternates
+    trigger: PromocionDadaDeBaja
+    target: PromocionRehabilitada
+  - id: CR-007
+    description: Una promoción dada de baja no puede modificarse hasta que sea rehabilitada.
+    correlate_by:
+      - promotion_id
+    kind: prohibits_between
+    trigger: PromocionDadaDeBaja
+    target: PromocionRehabilitada
+    prohibited: PromocionActualizada
+  - id: CR-008
+    description: La vigencia de una promoción dada de baja no puede evaluarse hasta que sea rehabilitada.
+    correlate_by:
+      - promotion_id
+    kind: prohibits_between
+    trigger: PromocionDadaDeBaja
+    target: PromocionRehabilitada
+    prohibited: VigenciaConsultada

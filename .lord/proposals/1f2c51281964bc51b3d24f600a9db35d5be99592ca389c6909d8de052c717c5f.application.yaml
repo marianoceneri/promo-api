@@ -1,0 +1,215 @@
+version: "0.2"
+kind: application_contract
+status: proposal
+proposal_id: sha256:1f2c51281964bc51b3d24f600a9db35d5be99592ca389c6909d8de052c717c5f
+source_contract_id: sha256:1d64b2472889e32cd56eafaf8b4b15add3eba06f3da241f702103d43033f2b73
+proposed_contract_id: sha256:566bb9fd1216b09c973fb45102375a522df9c0719ecaa3be0b2f7c3350e16afc
+proposed_by: marianoceneri
+rationale: "Incorpora la baja de promociones como capacidad explícita del catálogo, fiel a las 6 decisiones ratificadas en la negociación sha256:47b30914… AQ-BAJA-NATURALEZA=1: baja lógica mediante DisablePromotion (transition enabled true->false, emite PromocionDadaDeBaja). AQ-BAJA-REALTA=2: rehabilitación mediante EnablePromotion (transition false->true, emite PromocionRehabilitada). AQ-BAJA-EFECTO=3: state_guard enabled=true en UpdatePromotion y CheckPromotionValidity, de modo que una promoción dada de baja solo pueda consultarse; la evaluación de vigencia pasa a rechazarse con 409, cambio observable confirmado por el operador. AQ-BAJA-VISIBILIDAD=2: ListPromotions incorpora el parámetro de consulta booleano opcional enabled, mapeado al campo homónimo. AQ-BAJA-BYPASS=1: el campo enabled pasa a immutable para que solo las transiciones dedicadas cambien el estado, preservando la emisión de eventos y el sujeto de CR-006, CR-007 y CR-008. AQ-BAJA-VENCIDA=1: EnablePromotion lleva la misma precondición temporal que Create/Update (ends_at at_or_after request_time), de modo que ningún camino de escritura deje enabled=true con vigencia vencida. Alineación con el contrato operacional activo sha256:1fb3d8fa…: aligned."
+negotiation_id: sha256:47b309141561a103fac4e78c81c710befc6ccf087e3059c3bf5e39f533288970
+decisions_fingerprint: sha256:97657eb3f2be4d3ba25d54a8a04448895db01aab39a7e56974f46949dcc5bbac
+created_at: 2026-08-11T14:52:12.529Z
+impact:
+  entities_added: []
+  entities_removed: []
+  entities_modified:
+    - Promotion
+  operations_added:
+    - DisablePromotion
+    - EnablePromotion
+  operations_removed: []
+  operations_modified:
+    - CheckPromotionValidity
+    - ListPromotions
+    - UpdatePromotion
+  policies_added: []
+  policies_removed: []
+  flows_added: []
+  flows_removed: []
+contract:
+  version: "0.2"
+  name: promo-api
+  target:
+    kind: go-rest
+    module: github.com/marianoceneri/promo-api
+    port: 8080
+  entities:
+    - name: Promotion
+      title: promoción
+      plural: promotions
+      id_field: id
+      storage: memory
+      fields:
+        - name: id
+          type: string
+          required: true
+          immutable: true
+        - name: name
+          type: string
+          required: true
+          immutable: false
+        - name: starts_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: ends_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: installments
+          type: integer
+          required: true
+          immutable: false
+          minimum: 1
+          maximum: 48
+        - name: discount_percent
+          type: integer
+          required: true
+          immutable: false
+          minimum: 0
+          maximum: 100
+        - name: enabled
+          type: boolean
+          required: true
+          immutable: true
+  operations:
+    - id: CreatePromotion
+      title: Crear promoción
+      kind: create
+      entity: Promotion
+      method: POST
+      path: /v1/promotions
+      emits: PromocionCreada
+      correlation:
+        promotion_id: id
+      parameters: []
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: UpdatePromotion
+      title: Modificar promoción
+      kind: update
+      entity: Promotion
+      method: PUT
+      path: /v1/promotions/{id}
+      emits: PromocionActualizada
+      correlation:
+        promotion_id: id
+      parameters: []
+      state_guard:
+        field: enabled
+        equals: true
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: DisablePromotion
+      title: Dar de baja promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/disable
+      emits: PromocionDadaDeBaja
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: enabled
+        from: true
+        to: false
+    - id: EnablePromotion
+      title: Rehabilitar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/enable
+      emits: PromocionRehabilitada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: enabled
+        from: false
+        to: true
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: GetPromotion
+      title: Consultar promoción
+      kind: get
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}
+      emits: PromocionConsultada
+      correlation:
+        promotion_id: id
+      parameters: []
+    - id: ListPromotions
+      title: Listar promociones
+      kind: list
+      entity: Promotion
+      method: GET
+      path: /v1/promotions
+      emits: CatalogoConsultado
+      correlation: {}
+      parameters:
+        - name: enabled
+          in: query
+          type: boolean
+          required: false
+          field: enabled
+          description: Filtra el listado por estado de habilitación de la promoción.
+    - id: CheckPromotionValidity
+      title: Consultar vigencia
+      kind: evaluate_validity
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}/validity
+      emits: VigenciaConsultada
+      correlation:
+        promotion_id: id
+      parameters:
+        - name: at
+          in: query
+          type: datetime
+          required: true
+          description: Instante para el cual se evalúa la vigencia, en formato RFC3339.
+      state_guard:
+        field: enabled
+        equals: true
+  policies:
+    - id: PromotionValidity
+      kind: active_between
+      entity: Promotion
+      start_field: starts_at
+      end_field: ends_at
+      enabled_field: enabled
+      inclusive_start: true
+      exclusive_end: true
+  flows:
+    - name: CatalogManagement
+      title: Gestión de catálogo
+      purpose: Crear, modificar, dar de baja y rehabilitar promociones administradas.
+      operations:
+        - CreatePromotion
+        - UpdatePromotion
+        - DisablePromotion
+        - EnablePromotion
+    - name: AuthorizationSupport
+      title: Soporte a autorizaciones
+      purpose: Informar vigencia, cuotas y descuento para asistir al equipo autorizador.
+      operations:
+        - GetPromotion
+        - ListPromotions
+        - CheckPromotionValidity

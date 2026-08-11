@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ func NewHandler(promotions *store.PromotionStore) http.Handler {
 	})
 	mux.HandleFunc("POST /v1/promotions", handler.createPromotion)
 	mux.HandleFunc("PUT /v1/promotions/{id}", handler.updatePromotion)
+	mux.HandleFunc("POST /v1/promotions/{id}/disable", handler.disablePromotion)
+	mux.HandleFunc("POST /v1/promotions/{id}/enable", handler.enablePromotion)
 	mux.HandleFunc("GET /v1/promotions/{id}", handler.getPromotion)
 	mux.HandleFunc("GET /v1/promotions", handler.listPromotions)
 	mux.HandleFunc("GET /v1/promotions/{id}/validity", handler.checkPromotionValidity)
@@ -77,7 +80,10 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not get promotion")
 		return
 	}
-	_ = current
+	if current.Enabled != true {
+		writeError(w, http.StatusConflict, "operation requires enabled=true")
+		return
+	}
 	var value domain.Promotion
 	if err := decodeJSON(r, &value); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -89,6 +95,10 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 	}
 	if value.Id != id {
 		writeError(w, http.StatusBadRequest, "immutable id does not match path")
+		return
+	}
+	if current.Enabled != value.Enabled {
+		writeError(w, http.StatusConflict, "enabled is immutable")
 		return
 	}
 	applyPromotionDefaults(&value)
@@ -111,6 +121,60 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (h *Handler) disablePromotion(w http.ResponseWriter, r *http.Request) {
+	value, err := h.promotions.Get(r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not get promotion")
+		return
+	}
+	if value.Enabled != true {
+		writeError(w, http.StatusConflict, "transition requires enabled=true")
+		return
+	}
+	value.Enabled = false
+	if err := h.promotions.Update(value); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not transition promotion")
+		return
+	}
+	w.Header().Set("X-LORD-Event", "PromocionDadaDeBaja")
+	h.events.Record("PromocionDadaDeBaja", map[string]any{"promotion_id": value.Id})
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (h *Handler) enablePromotion(w http.ResponseWriter, r *http.Request) {
+	value, err := h.promotions.Get(r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not get promotion")
+		return
+	}
+	if value.Enabled != false {
+		writeError(w, http.StatusConflict, "transition requires enabled=false")
+		return
+	}
+	value.Enabled = true
+	if value.Enabled == true {
+		if value.EndsAt.Before(time.Now().UTC()) {
+			writeError(w, http.StatusConflict, "enabled=true requires ends_at at or after the request time")
+			return
+		}
+	}
+	if err := h.promotions.Update(value); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not transition promotion")
+		return
+	}
+	w.Header().Set("X-LORD-Event", "PromocionRehabilitada")
+	h.events.Record("PromocionRehabilitada", map[string]any{"promotion_id": value.Id})
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (h *Handler) getPromotion(w http.ResponseWriter, r *http.Request) {
 	value, err := h.promotions.Get(r.PathValue("id"))
 	if err != nil {
@@ -128,6 +192,21 @@ func (h *Handler) getPromotion(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listPromotions(w http.ResponseWriter, r *http.Request) {
 	values := h.promotions.List()
+	raw0 := r.URL.Query().Get("enabled")
+	if raw0 != "" {
+		filter0, err := strconv.ParseBool(raw0)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "enabled must be a boolean")
+			return
+		}
+		filtered := values[:0]
+		for _, value := range values {
+			if value.Enabled == filter0 {
+				filtered = append(filtered, value)
+			}
+		}
+		values = filtered
+	}
 	w.Header().Set("X-LORD-Event", "CatalogoConsultado")
 	h.events.Record("CatalogoConsultado", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"promotions": values})
@@ -141,6 +220,10 @@ func (h *Handler) checkPromotionValidity(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "could not get promotion")
+		return
+	}
+	if value.Enabled != true {
+		writeError(w, http.StatusConflict, "operation requires enabled=true")
 		return
 	}
 	evaluatedAt, err := time.Parse(time.RFC3339, r.URL.Query().Get("at"))

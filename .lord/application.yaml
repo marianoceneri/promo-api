@@ -42,7 +42,7 @@ entities:
       - name: enabled
         type: boolean
         required: true
-        immutable: false
+        immutable: true
 operations:
   - id: CreatePromotion
     title: Crear promoción
@@ -71,6 +71,44 @@ operations:
     correlation:
       promotion_id: id
     parameters: []
+    state_guard:
+      field: enabled
+      equals: true
+    precondition:
+      when:
+        field: enabled
+        equals: true
+      requires:
+        field: ends_at
+        at_or_after: request_time
+  - id: DisablePromotion
+    title: Dar de baja promoción
+    kind: transition
+    entity: Promotion
+    method: POST
+    path: /v1/promotions/{id}/disable
+    emits: PromocionDadaDeBaja
+    correlation:
+      promotion_id: id
+    parameters: []
+    transition:
+      field: enabled
+      from: true
+      to: false
+  - id: EnablePromotion
+    title: Rehabilitar promoción
+    kind: transition
+    entity: Promotion
+    method: POST
+    path: /v1/promotions/{id}/enable
+    emits: PromocionRehabilitada
+    correlation:
+      promotion_id: id
+    parameters: []
+    transition:
+      field: enabled
+      from: false
+      to: true
     precondition:
       when:
         field: enabled
@@ -96,7 +134,13 @@ operations:
     path: /v1/promotions
     emits: CatalogoConsultado
     correlation: {}
-    parameters: []
+    parameters:
+      - name: enabled
+        in: query
+        type: boolean
+        required: false
+        field: enabled
+        description: Filtra el listado por estado de habilitación de la promoción.
   - id: CheckPromotionValidity
     title: Consultar vigencia
     kind: evaluate_validity
@@ -112,6 +156,9 @@ operations:
         type: datetime
         required: true
         description: Instante para el cual se evalúa la vigencia, en formato RFC3339.
+    state_guard:
+      field: enabled
+      equals: true
 policies:
   - id: PromotionValidity
     kind: active_between
@@ -124,10 +171,12 @@ policies:
 flows:
   - name: CatalogManagement
     title: Gestión de catálogo
-    purpose: Crear y modificar promociones administradas.
+    purpose: Crear, modificar, dar de baja y rehabilitar promociones administradas.
     operations:
       - CreatePromotion
       - UpdatePromotion
+      - DisablePromotion
+      - EnablePromotion
   - name: AuthorizationSupport
     title: Soporte a autorizaciones
     purpose: Informar vigencia, cuotas y descuento para asistir al equipo autorizador.

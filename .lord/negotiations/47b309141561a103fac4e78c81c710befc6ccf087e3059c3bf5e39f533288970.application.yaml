@@ -1,0 +1,102 @@
+version: "0.3"
+kind: application_negotiation
+negotiation_id: sha256:47b309141561a103fac4e78c81c710befc6ccf087e3059c3bf5e39f533288970
+source_contract_id: sha256:1d64b2472889e32cd56eafaf8b4b15add3eba06f3da241f702103d43033f2b73
+request: "Reapertura contra el contrato activo sha256:1d64b247… de la negociación de bajas sha256:4ea98209… (obsoleta tras e583a5f). Conserva las 4 decisiones originales y agrega las 2 interacciones declaradas por el agente en el ensayo 3: rehabilitación de promociones vencidas y bypass del canal genérico de escritura sobre enabled."
+requested_by: "marianoceneri (delegado autorizado: Claude, ensayo 3)"
+created_at: 2026-08-11T14:50:57.571Z
+questions:
+  - question_id: AQ-BAJA-NATURALEZA
+    question: ¿Qué significa dar de baja una promoción en el catálogo?
+    alternatives:
+      - choice: 1
+        answer: "Baja lógica: permanece en el catálogo con enabled=false y sigue consultable."
+        consequence: Transición dedicada enabled true→false; la historia se conserva.
+      - choice: 2
+        answer: "Baja física: se elimina del catálogo."
+        consequence: Operación de borrado; las consultas posteriores pierden sujeto.
+  - question_id: AQ-BAJA-REALTA
+    question: Una vez dada de baja, ¿puede rehabilitarse la misma promoción?
+    alternatives:
+      - choice: 1
+        answer: "No: la baja es definitiva."
+        consequence: El evento de baja es único por promoción.
+      - choice: 2
+        answer: "Sí: mediante una operación dedicada de rehabilitación."
+        consequence: Segunda transición false→true con evento propio; baja y rehabilitación alternan.
+  - question_id: AQ-BAJA-EFECTO
+    question: ¿Qué operaciones quedan prohibidas sobre una promoción dada de baja?
+    alternatives:
+      - choice: 1
+        answer: Ninguna.
+        consequence: Sin guardas de estado.
+      - choice: 2
+        answer: No puede modificarse; sí consultarse y evaluarse.
+        consequence: state_guard en UpdatePromotion y regla operacional.
+      - choice: 3
+        answer: No puede modificarse ni evaluarse su vigencia; solo consultarse.
+        consequence: state_guard en UpdatePromotion y CheckPromotionValidity; la evaluación de vigencia pasa de responder 'no vigente' a rechazarse con 409, cambio observable para el equipo autorizador.
+  - question_id: AQ-BAJA-VISIBILIDAD
+    question: ¿Cómo aparecen las promociones dadas de baja en el listado?
+    alternatives:
+      - choice: 1
+        answer: Se listan junto con las activas.
+        consequence: ListPromotions no cambia.
+      - choice: 2
+        answer: El listado debe poder filtrarse por estado.
+        consequence: Parámetro de consulta booleano tipado sobre enabled.
+  - question_id: AQ-BAJA-BYPASS
+    question: ¿La modificación genérica (UpdatePromotion) puede seguir escribiendo enabled directamente?
+    alternatives:
+      - choice: 1
+        answer: "No: solo las transiciones dedicadas cambian el estado."
+        consequence: enabled pasa a immutable para el PUT; toda baja/rehabilitación emite su evento y las reglas CR-006/007/008 conservan sujeto.
+      - choice: 2
+        answer: "Sí: el PUT también puede cambiar el estado."
+        consequence: Una baja por PUT no emite PromocionDadaDeBaja y las garantías ratificadas son eludibles.
+  - question_id: AQ-BAJA-VENCIDA
+    question: ¿La rehabilitación de una promoción con ends_at ya vencido debe rechazarse, en línea con la regla activa de vencimiento?
+    alternatives:
+      - choice: 1
+        answer: "Sí: EnablePromotion lleva la misma precondición temporal que Create/Update."
+        consequence: Ningún camino de escritura puede dejar enabled=true con vigencia vencida.
+      - choice: 2
+        answer: "No: la rehabilitación queda exenta."
+        consequence: La regla de vencimiento aprobada en e583a5f queda eludible por la vía nueva.
+decisions:
+  - question_id: AQ-BAJA-NATURALEZA
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 3)"
+    rationale: "Ratifica la decisión original del 2026-08-10: baja lógica con historia conservada."
+    decided_at: 2026-08-11T14:50:57.575Z
+  - question_id: AQ-BAJA-REALTA
+    revision: 1
+    choice: 2
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 3)"
+    rationale: "Ratifica la decisión original del 2026-08-10: rehabilitación mediante transición dedicada con evento propio."
+    decided_at: 2026-08-11T14:50:57.578Z
+  - question_id: AQ-BAJA-EFECTO
+    revision: 1
+    choice: 3
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 3)"
+    rationale: "Ratifica la decisión original del 2026-08-10 y confirma explícitamente el cambio observable: la evaluación de vigencia de una promoción dada de baja se rechaza con 409 en lugar de responder 'no vigente'."
+    decided_at: 2026-08-11T14:50:57.580Z
+  - question_id: AQ-BAJA-VISIBILIDAD
+    revision: 1
+    choice: 2
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 3)"
+    rationale: "Ratifica la decisión original del 2026-08-10: filtro tipado por estado en el listado."
+    decided_at: 2026-08-11T14:50:57.582Z
+  - question_id: AQ-BAJA-BYPASS
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 3)"
+    rationale: "Solo las transiciones dedicadas cambian el estado: enabled queda immutable para el PUT, preservando la emisión de eventos y el sujeto de CR-006/007/008."
+    decided_at: 2026-08-11T14:50:57.584Z
+  - question_id: AQ-BAJA-VENCIDA
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 3)"
+    rationale: "La regla de vencimiento aprobada en e583a5f no debe ser eludible: EnablePromotion lleva la misma precondición temporal (at_or_after request_time)."
+    decided_at: 2026-08-11T14:50:57.587Z
