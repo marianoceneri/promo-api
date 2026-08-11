@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: operational_contract_approval
+approval_id: sha256:9e6783ff8aaae3b5851172b718a76cab3dc87b8d3376fe84cb861f444cb45ce4
+proposal_id: sha256:9f6a283bb2654339d54e30abba6b5aef988d42cf93e03a021dad151a7a363b9d
+source_contract_id: sha256:7b2a2ff0433f420f889d35a9f17537f99a8624c99dc14d298542bf2b6bd0771a
+contract_id: sha256:47f78ab02f20d45bf72c692c57709a1be735fdbb1d26469b11f510994fbd4355
+approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 6)"
+approved_at: 2026-08-11T18:36:39.365Z
+rationale: "CR-018..CR-027 materializan las 5 ratificaciones de la negociación b09a488d: unicidad de emisión y canje por código, orden emisión→consulta→canje, y prohibiciones de emisión y canje tras archivado y durante la baja, correlacionadas por coupon_code y promotion_id. Z3 consistente sin eventos muertos (bound 24). Las reglas son verificación redundante de las guardas de borde, no sustituto."

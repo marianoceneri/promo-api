@@ -18,11 +18,12 @@ import (
 
 type Handler struct {
 	promotions *store.PromotionStore
+	coupons    *store.CouponStore
 	events     *observability.Recorder
 }
 
-func newHandler(promotions *store.PromotionStore) (*Handler, http.Handler) {
-	handler := &Handler{promotions: promotions, events: observability.NewRecorder()}
+func newHandler(promotions *store.PromotionStore, coupons *store.CouponStore) (*Handler, http.Handler) {
+	handler := &Handler{promotions: promotions, coupons: coupons, events: observability.NewRecorder()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -39,19 +40,22 @@ func newHandler(promotions *store.PromotionStore) (*Handler, http.Handler) {
 	mux.HandleFunc("GET /v1/promotions/{id}", handler.getPromotion)
 	mux.HandleFunc("GET /v1/promotions", handler.listPromotions)
 	mux.HandleFunc("GET /v1/promotions/{id}/validity", handler.checkPromotionValidity)
+	mux.HandleFunc("POST /v1/coupons", handler.issueCoupon)
+	mux.HandleFunc("GET /v1/coupons/{code}", handler.getCoupon)
+	mux.HandleFunc("POST /v1/coupons/{code}/redeem", handler.redeemCoupon)
 	return handler, mux
 }
 
-func NewHandler(promotions *store.PromotionStore) http.Handler {
-	_, mux := newHandler(promotions)
+func NewHandler(promotions *store.PromotionStore, coupons *store.CouponStore) http.Handler {
+	_, mux := newHandler(promotions, coupons)
 	return mux
 }
 
 // NewHandlerWithHistory reports whether the event history is complete: a
 // service starting over pre-existing persistent state must declare an
 // incomplete history so runtime verification stays honest.
-func NewHandlerWithHistory(historyComplete bool, promotions *store.PromotionStore) http.Handler {
-	handler, mux := newHandler(promotions)
+func NewHandlerWithHistory(historyComplete bool, promotions *store.PromotionStore, coupons *store.CouponStore) http.Handler {
+	handler, mux := newHandler(promotions, coupons)
 	if !historyComplete {
 		handler.events.MarkHistoryIncomplete()
 	}
@@ -337,6 +341,113 @@ func (h *Handler) checkPromotionValidity(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"id": value.Id, "valid": valid, "at": evaluatedAt, "characteristics": value})
 }
 
+func (h *Handler) issueCoupon(w http.ResponseWriter, r *http.Request) {
+	var value domain.Coupon
+	if err := decodeJSON(r, &value); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	applyCouponDefaults(&value)
+	if err := validateCoupon(value); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := h.promotions.Get(value.PromotionId); err != nil {
+		writeError(w, http.StatusConflict, "promotion_id references a promotion that does not exist")
+		return
+	}
+	viaPromotionId, err := h.promotions.Get(value.PromotionId)
+	if err != nil {
+		writeError(w, http.StatusConflict, "promotion_id references a promotion that does not exist")
+		return
+	}
+	if viaPromotionId.Status != "published" {
+		writeError(w, http.StatusConflict, "operation requires its promotion (via promotion_id) to have status=published")
+		return
+	}
+	if viaPromotionId.Enabled != true {
+		writeError(w, http.StatusConflict, "operation requires its promotion (via promotion_id) to have enabled=true")
+		return
+	}
+	if err := h.coupons.Create(value); err != nil {
+		if errors.Is(err, store.ErrAlreadyExists) {
+			writeError(w, http.StatusConflict, "code already exists")
+			return
+		}
+		if errors.Is(err, store.ErrInvalidReference) {
+			writeError(w, http.StatusConflict, "a referenced entity does not exist")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not create coupon")
+		return
+	}
+	w.Header().Set("X-LORD-Event", "CuponEmitido")
+	h.events.Record("CuponEmitido", map[string]any{"coupon_code": value.Code, "promotion_id": value.PromotionId})
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (h *Handler) getCoupon(w http.ResponseWriter, r *http.Request) {
+	value, err := h.coupons.Get(r.PathValue("code"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not get coupon")
+		return
+	}
+	w.Header().Set("X-LORD-Event", "CuponConsultado")
+	h.events.Record("CuponConsultado", map[string]any{"coupon_code": value.Code, "promotion_id": value.PromotionId})
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (h *Handler) redeemCoupon(w http.ResponseWriter, r *http.Request) {
+	value, err := h.coupons.Get(r.PathValue("code"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not get coupon")
+		return
+	}
+	viaPromotionId, err := h.promotions.Get(value.PromotionId)
+	if err != nil {
+		writeError(w, http.StatusConflict, "promotion_id references a promotion that does not exist")
+		return
+	}
+	if viaPromotionId.Status != "published" {
+		writeError(w, http.StatusConflict, "operation requires its promotion (via promotion_id) to have status=published")
+		return
+	}
+	if viaPromotionId.Enabled != true {
+		writeError(w, http.StatusConflict, "operation requires its promotion (via promotion_id) to have enabled=true")
+		return
+	}
+	if value.Status != "issued" {
+		writeError(w, http.StatusConflict, "transition requires status=issued")
+		return
+	}
+	value.Status = "redeemed"
+	policyViaPromotionId, err := h.promotions.Get(value.PromotionId)
+	if err != nil {
+		writeError(w, http.StatusConflict, "promotion_id references a promotion that does not exist")
+		return
+	}
+	now := time.Now().UTC()
+	if now.Before(policyViaPromotionId.StartsAt) || !now.Before(policyViaPromotionId.EndsAt) || !policyViaPromotionId.Enabled {
+		writeError(w, http.StatusConflict, "RedeemCoupon requires the promotion referenced by promotion_id to satisfy PromotionValidity")
+		return
+	}
+	if err := h.coupons.Update(value); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not transition coupon")
+		return
+	}
+	w.Header().Set("X-LORD-Event", "CuponCanjeado")
+	h.events.Record("CuponCanjeado", map[string]any{"coupon_code": value.Code, "promotion_id": value.PromotionId})
+	writeJSON(w, http.StatusOK, value)
+}
+
 func applyPromotionDefaults(value *domain.Promotion) {
 	if value.Status == "" {
 		value.Status = "draft"
@@ -373,6 +484,25 @@ func validatePromotion(value domain.Promotion) error {
 	}
 	if !value.StartsAt.Before(value.EndsAt) {
 		return errors.New("starts_at must precede ends_at")
+	}
+	return nil
+}
+
+func applyCouponDefaults(value *domain.Coupon) {
+	if value.Status == "" {
+		value.Status = "issued"
+	}
+}
+
+func validateCoupon(value domain.Coupon) error {
+	if strings.TrimSpace(value.Code) == "" {
+		return errors.New("code is required")
+	}
+	if strings.TrimSpace(value.PromotionId) == "" {
+		return errors.New("promotion_id is required")
+	}
+	if !map[string]bool{"issued": true, "redeemed": true}[value.Status] {
+		return errors.New("status has an unsupported value")
 	}
 	return nil
 }

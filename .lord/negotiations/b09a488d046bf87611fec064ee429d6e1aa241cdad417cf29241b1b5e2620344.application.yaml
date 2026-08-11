@@ -1,0 +1,93 @@
+version: "0.3"
+kind: application_negotiation
+negotiation_id: sha256:b09a488d046bf87611fec064ee429d6e1aa241cdad417cf29241b1b5e2620344
+source_contract_id: sha256:c434ffd85c23b1193f24005204900bd9369b656f50eb7a35c64eba613c01457e
+request: "Incorporar cupones al catálogo. Una promoción publicada puede emitir cupones; cada cupón tiene un código único y pertenece a una única promoción. Un cupón puede canjearse una sola vez, y el canje solo es válido mientras su promoción está publicada, habilitada y vigente. Un cupón de una promoción archivada o dada de baja no puede canjearse. Verificación determinista previa: el contrato de aplicación 0.2 acepta una segunda entidad Coupon y una transición de canje issued->redeemed (validate_application_contract: valid, sha256:1ca1af2a...), pero rechaza toda referencia entre entidades: 'entities.1.fields.1: Unrecognized key: \"references\"', 'operations.10.state_guards.0: Invalid input' (guard sobre entidad Promotion), 'operations.10.precondition: Unrecognized keys: \"entity\", \"via\"'. En consecuencia, la condición de canje que depende del estado de la promoción no es bloqueable en el borde de la API; solo es expresable como reglas de traza operacional (analyze_contract sobre el candidato CR-018..CR-025: consistent, sin eventos muertos). La vigencia temporal de la promoción al momento del canje no es expresable por ningún camino: las primitivas operacionales no expresan ventanas de tiempo y la precondición de aplicación solo compara un campo datetime de la misma entidad contra el instante de la solicitud."
+requested_by: marianoceneri
+created_at: 2026-08-11T16:24:09.823Z
+questions:
+  - question_id: AQ-COUPON-REDEEM-GUARD
+    question: El motor no puede condicionar el canje de un cupón al estado de su promoción en el borde de la API (no existen guards entre entidades). ¿Cómo procedemos con esa brecha?
+    alternatives:
+      - choice: 1
+        answer: "Aceptar la brecha: la API acepta el canje y la restricción queda expresada como reglas operacionales CR-022, CR-023 y CR-024, verificables sobre la traza con verify_runtime."
+        consequence: El canje de un cupón de una promoción archivada o dada de baja NO es rechazado por la API; se detecta como violación de contrato después del hecho. La regla de negocio queda declarada pero no impuesta en línea.
+      - choice: 2
+        answer: "No incorporar el canje hasta que el motor soporte guards entre entidades: en esta iteración solo emisión y consulta de cupones."
+        consequence: Se entrega un catálogo de cupones sin operación de canje. Ninguna regla de negocio queda a medias, pero el pedido queda incompleto hasta una extensión del motor.
+      - choice: 3
+        answer: Copiar el estado de la promoción dentro del cupón (campos propios del cupón) y guardar el canje contra esa copia.
+        consequence: "APROXIMACIÓN EXPLÍCITA: el guard actúa sobre una copia que el motor no mantiene sincronizada con la promoción. Archivar o dar de baja una promoción no actualizaría sus cupones, de modo que el bloqueo sería incorrecto en exactamente los casos que el pedido quiere evitar."
+  - question_id: AQ-COUPON-VIGENCIA
+    question: El requisito 'el canje solo es válido mientras la promoción está vigente' (dentro de starts_at..ends_at) no es expresable en ningún contrato. ¿Cómo lo dejamos registrado?
+    alternatives:
+      - choice: 1
+        answer: "Declararlo como requisito no soportado del motor, sin aproximarlo: el contrato no mencionará vigencia en el canje."
+        consequence: Queda constancia determinista de la limitación. El canje no verifica la ventana temporal de la promoción por ningún medio.
+      - choice: 2
+        answer: Copiar ends_at de la promoción al cupón y usar una precondición at_or_after sobre esa copia.
+        consequence: "APROXIMACIÓN EXPLÍCITA Y PARCIAL: cubriría solo el extremo final y solo con el valor vigente al emitir; no cubre starts_at ni modificaciones posteriores de la promoción."
+      - choice: 3
+        answer: Quitar la vigencia del alcance del canje por decisión de negocio.
+        consequence: "El pedido se reduce formalmente: el canje depende de publicación y habilitación, no de la ventana temporal. No hay limitación pendiente que reportar."
+  - question_id: AQ-COUPON-CODE-ORIGIN
+    question: ¿Quién define el código único del cupón?
+    alternatives:
+      - choice: 1
+        answer: Lo provee quien emite el cupón, como identificador de la entidad.
+        consequence: "Expresable hoy: el código es el id_field del cupón y su unicidad la garantiza el almacenamiento. El emisor es responsable de elegirlo."
+      - choice: 2
+        answer: Lo genera el servicio automáticamente.
+        consequence: "No expresable: el contrato de aplicación no tiene primitiva de generación de identificadores. Requeriría una extensión del motor."
+  - question_id: AQ-COUPON-ISSUE-STATE
+    question: ¿En qué estados de la promoción se pueden emitir cupones?
+    alternatives:
+      - choice: 1
+        answer: Solo mientras la promoción está publicada y habilitada.
+        consequence: Se agregan reglas operacionales que prohíben emitir tras el archivado y entre baja y rehabilitación. Igual que el canje, no es bloqueable en el borde de la API.
+      - choice: 2
+        answer: Solo después de publicada, aunque luego esté dada de baja o archivada.
+        consequence: Regla operacional única CR-019 (emitir solo después de publicar). Menos reglas, mayor tolerancia operativa.
+      - choice: 3
+        answer: En cualquier estado, incluso en borrador.
+        consequence: No se agrega ninguna regla de orden para la emisión. El pedido dice 'una promoción publicada puede emitir cupones', por lo que esta alternativa se aparta del enunciado.
+  - question_id: AQ-COUPON-LIST
+    question: ¿El soporte a autorizaciones debe poder listar cupones?
+    alternatives:
+      - choice: 1
+        answer: Sí, con filtros por promoción y por estado de canje.
+        consequence: Se agrega una operación de listado y un evento de catálogo de cupones. Amplía la superficie consultable.
+      - choice: 2
+        answer: "No: solo consulta de un cupón por su código."
+        consequence: Superficie mínima. No hay forma de enumerar los cupones emitidos de una promoción.
+decisions:
+  - question_id: AQ-COUPON-REDEEM-GUARD
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 6)"
+    rationale: "El operador eligió la opción 1 cuando el motor no tenía guardas entre entidades. Tras la evolución 0.8.0 esa brecha ya no existe: `state_guards` con `via` sobre un campo `references` permite exigir en el borde el estado de la promoción. Se ratifica la intención (la restricción debe regir) con la implementación fuerte: guarda en el borde MÁS las reglas operacionales CR-022..CR-024 como verificación de traza. No se acepta ninguna brecha."
+    decided_at: 2026-08-11T18:31:12.758Z
+  - question_id: AQ-COUPON-VIGENCIA
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 6)"
+    rationale: "El operador eligió declarar el requisito como no soportado antes que aproximarlo copiando ends_at (opción 2 explícitamente descartada por él y por el agente). La evolución 0.8.0 hace innecesaria la aproximación: `precondition.requires: { policy: PromotionValidity, via: promotion_id }` evalúa la política ya ratificada sobre la promoción referenciada, sin duplicar campos. Se ratifica la intención original —vigencia exigida en el canje, sin copias desincronizables— ahora expresable."
+    decided_at: 2026-08-11T18:31:12.765Z
+  - question_id: AQ-COUPON-CODE-ORIGIN
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 6)"
+    rationale: El código lo provee quien emite el cupón, como identificador de la entidad.
+    decided_at: 2026-08-11T18:31:12.768Z
+  - question_id: AQ-COUPON-ISSUE-STATE
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 6)"
+    rationale: Solo se emiten cupones mientras la promoción está publicada y habilitada.
+    decided_at: 2026-08-11T18:31:12.772Z
+  - question_id: AQ-COUPON-LIST
+    revision: 1
+    choice: 2
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 6)"
+    rationale: "Sin listado de cupones: solo consulta por código."
+    decided_at: 2026-08-11T18:31:12.775Z

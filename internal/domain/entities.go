@@ -13,3 +13,9 @@ type Promotion struct {
 	Enabled         bool      `json:"enabled"`
 	Status          string    `json:"status"`
 }
+
+type Coupon struct {
+	Code        string `json:"code"`
+	PromotionId string `json:"promotion_id"`
+	Status      string `json:"status"`
+}

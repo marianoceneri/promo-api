@@ -12,8 +12,13 @@ import (
 	"github.com/marianoceneri/promo-api/internal/store"
 )
 
+func newTestHandler() http.Handler {
+	db := store.NewTestDatabase()
+	return NewHandler(store.NewPromotionStore(db), store.NewCouponStore(db))
+}
+
 func TestPromotionContractFlow(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
+	handler := newTestHandler()
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -140,7 +145,7 @@ func TestPromotionInstallmentsContractBoundaries(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
+			handler := newTestHandler()
 			request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte(test.body)))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -164,7 +169,7 @@ func TestPromotionDiscountPercentContractBoundaries(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
+			handler := newTestHandler()
 			request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte(test.body)))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -176,7 +181,7 @@ func TestPromotionDiscountPercentContractBoundaries(t *testing.T) {
 }
 
 func TestPromotionEnabledIsImmutable(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
+	handler := newTestHandler()
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -192,7 +197,7 @@ func TestPromotionEnabledIsImmutable(t *testing.T) {
 }
 
 func TestPromotionStatusIsImmutable(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
+	handler := newTestHandler()
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -219,7 +224,7 @@ func TestPromotionCreatePromotionPrecondition(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
+			handler := newTestHandler()
 			request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte(test.body)))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -231,7 +236,7 @@ func TestPromotionCreatePromotionPrecondition(t *testing.T) {
 }
 
 func TestPromotionUpdatePromotionPrecondition(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
+	handler := newTestHandler()
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2999-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -247,7 +252,7 @@ func TestPromotionUpdatePromotionPrecondition(t *testing.T) {
 }
 
 func TestPromotionEnablePromotionPrecondition(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
+	handler := newTestHandler()
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-TRANSITION\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -259,5 +264,65 @@ func TestPromotionEnablePromotionPrecondition(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
 		t.Fatalf("expired transition status = %d, want 409, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestCouponContractFlow(t *testing.T) {
+	handler := newTestHandler()
+	{
+		setup := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
+		setupResponse := httptest.NewRecorder()
+		handler.ServeHTTP(setupResponse, setup)
+		if setupResponse.Code != http.StatusCreated {
+			t.Fatalf("referenced Promotion setup status = %d, body = %s", setupResponse.Code, setupResponse.Body.String())
+		}
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/coupons", bytes.NewReader([]byte("{\"code\":\"code-test\",\"promotion_id\":\"PROMO-TEST\",\"status\":\"issued\"}")))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("X-LORD-Event") != "CuponEmitido" {
+		t.Fatal("create did not emit its contractual event")
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/coupons/code-test", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("get status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("X-LORD-Event") != "CuponConsultado" {
+		t.Fatal("get did not emit its contractual event")
+	}
+	request = httptest.NewRequest(http.MethodPost, "/v1/coupons/code-test/redeem", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("RedeemCoupon status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("X-LORD-Event") != "CuponCanjeado" {
+		t.Fatal("RedeemCoupon did not emit its contractual event")
+	}
+	request = httptest.NewRequest(http.MethodGet, "/_lord/events", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("events status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var events struct {
+		Events []struct {
+			Type string         `json:"type"`
+			Data map[string]any `json:"data"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &events); err != nil {
+		t.Fatal(err)
+	}
+	if len(events.Events) == 0 {
+		t.Fatal("expected structured LORD runtime events")
+	}
+	if events.Events[0].Data["coupon_code"] != "code-test" {
+		t.Fatalf("missing runtime correlation: %#v", events.Events[0].Data)
 	}
 }

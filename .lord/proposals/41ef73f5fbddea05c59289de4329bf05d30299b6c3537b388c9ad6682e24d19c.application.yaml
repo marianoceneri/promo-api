@@ -1,0 +1,365 @@
+version: "0.2"
+kind: application_contract
+status: proposal
+proposal_id: sha256:41ef73f5fbddea05c59289de4329bf05d30299b6c3537b388c9ad6682e24d19c
+source_contract_id: sha256:c434ffd85c23b1193f24005204900bd9369b656f50eb7a35c64eba613c01457e
+proposed_contract_id: sha256:d6666803d0fec55c76fb1bae88fb5a0778a35630d307a5e6c1315ef7c0022b96
+proposed_by: Claude (delegado autorizado por marianoceneri, ensayo 6)
+rationale: "Incorpora cupones al contrato de aplicación honrando las 5 ratificaciones sin bajar ninguna garantía a la traza, usando las capacidades nuevas del motor 0.8.0. Entidad Coupon (sqlite) con code como id_field provisto por el emisor (AQ-COUPON-CODE-ORIGIN opción 1), promotion_id con references a Promotion.id (una sola promoción por cupón, con FK real y rechazo de referencias inexistentes) y status enum issued/redeemed inmutable, para que el canje sea autoritativo por la transición. IssueCoupon (POST /v1/coupons) exige en el borde, vía state_guards con via promotion_id, que la promoción esté publicada y habilitada (AQ-COUPON-ISSUE-STATE opción 1). RedeemCoupon (POST /v1/coupons/{code}/redeem) es transition issued->redeemed, lo que impone el canje único en el borde, con los mismos state_guards via promotion_id (AQ-COUPON-REDEEM-GUARD: la intención ratificada era que la restricción rigiera; con 0.8.0 se impone en línea y ya no queda como brecha) y precondition.requires policy PromotionValidity via promotion_id, que exige la vigencia de la promoción referenciada al instante de la solicitud sin duplicar starts_at/ends_at en el cupón (AQ-COUPON-VIGENCIA: intención original, aproximación por copia descartada e innecesaria). GetCoupon (GET /v1/coupons/{code}) es la única lectura de cupones; no se agrega listado (AQ-COUPON-LIST opción 2). Nuevo flujo CouponManagement para emisión y canje; GetCoupon se incorpora a AuthorizationSupport. Las tres operaciones emiten CuponEmitido, CuponConsultado y CuponCanjeado, correlacionados por coupon_code y promotion_id, que la propuesta operacional sha256:9f6a283b agrega junto a CR-018..CR-027 como verificación de traza redundante con las guardas de borde. validate_application_contract: valid, sha256:d6666803. La alineación figura incomplete solo porque el contrato operacional que declara esos eventos todavía es propuesta: ambas deben aprobarse juntas."
+negotiation_id: sha256:b09a488d046bf87611fec064ee429d6e1aa241cdad417cf29241b1b5e2620344
+decisions_fingerprint: sha256:67573f817986c0a6ac85a19c9fcd0ffdb9591fbe69781a3776121ea54abb8937
+created_at: 2026-08-11T18:34:59.766Z
+impact:
+  entities_added:
+    - Coupon
+  entities_removed: []
+  entities_modified: []
+  operations_added:
+    - GetCoupon
+    - IssueCoupon
+    - RedeemCoupon
+  operations_removed: []
+  operations_modified: []
+  policies_added: []
+  policies_removed: []
+  flows_added:
+    - CouponManagement
+  flows_removed: []
+contract:
+  version: "0.2"
+  name: promo-api
+  target:
+    kind: go-rest
+    module: github.com/marianoceneri/promo-api
+    port: 8080
+    database:
+      kind: sqlite
+      path: ./data/promotions.db
+  entities:
+    - name: Promotion
+      title: promoción
+      plural: promotions
+      id_field: id
+      storage: sqlite
+      fields:
+        - name: id
+          type: string
+          required: true
+          immutable: true
+        - name: name
+          type: string
+          required: true
+          immutable: false
+        - name: starts_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: ends_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: installments
+          type: integer
+          required: true
+          immutable: false
+          minimum: 1
+          maximum: 48
+        - name: discount_percent
+          type: integer
+          required: true
+          immutable: false
+          minimum: 0
+          maximum: 100
+        - name: enabled
+          type: boolean
+          required: true
+          immutable: true
+        - name: status
+          type: string
+          required: false
+          immutable: true
+          default: draft
+          enum:
+            - draft
+            - published
+            - archived
+    - name: Coupon
+      title: cupón
+      plural: coupons
+      id_field: code
+      storage: sqlite
+      fields:
+        - name: code
+          type: string
+          required: true
+          immutable: true
+        - name: promotion_id
+          type: string
+          required: true
+          immutable: true
+          references:
+            entity: Promotion
+            field: id
+        - name: status
+          type: string
+          required: false
+          immutable: true
+          default: issued
+          enum:
+            - issued
+            - redeemed
+  operations:
+    - id: CreatePromotion
+      title: Crear promoción
+      kind: create
+      entity: Promotion
+      method: POST
+      path: /v1/promotions
+      emits: PromocionCreada
+      correlation:
+        promotion_id: id
+      parameters: []
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: UpdatePromotion
+      title: Modificar promoción
+      kind: update
+      entity: Promotion
+      method: PUT
+      path: /v1/promotions/{id}
+      emits: PromocionActualizada
+      correlation:
+        promotion_id: id
+      parameters: []
+      state_guards:
+        - field: enabled
+          equals: true
+        - field: status
+          in:
+            - draft
+            - published
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: PublishPromotion
+      title: Publicar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/publish
+      emits: PromocionPublicada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: status
+        from: draft
+        to: published
+    - id: ArchivePromotion
+      title: Archivar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/archive
+      emits: PromocionArchivada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: status
+        from: published
+        to: archived
+    - id: DisablePromotion
+      title: Dar de baja promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/disable
+      emits: PromocionDadaDeBaja
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: enabled
+        from: true
+        to: false
+      state_guards:
+        - field: status
+          in:
+            - draft
+            - published
+    - id: EnablePromotion
+      title: Rehabilitar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/enable
+      emits: PromocionRehabilitada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: enabled
+        from: false
+        to: true
+      state_guards:
+        - field: status
+          in:
+            - draft
+            - published
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: GetPromotion
+      title: Consultar promoción
+      kind: get
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}
+      emits: PromocionConsultada
+      correlation:
+        promotion_id: id
+      parameters: []
+    - id: ListPromotions
+      title: Listar promociones
+      kind: list
+      entity: Promotion
+      method: GET
+      path: /v1/promotions
+      emits: CatalogoConsultado
+      correlation: {}
+      parameters:
+        - name: enabled
+          in: query
+          type: boolean
+          required: false
+          field: enabled
+          description: Filtra el listado por estado de habilitación de la promoción.
+        - name: status
+          in: query
+          type: string
+          required: false
+          field: status
+          description: "Filtra el listado por estado del ciclo de vida editorial: draft, published o archived."
+    - id: CheckPromotionValidity
+      title: Consultar vigencia
+      kind: evaluate_validity
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}/validity
+      emits: VigenciaConsultada
+      correlation:
+        promotion_id: id
+      parameters:
+        - name: at
+          in: query
+          type: datetime
+          required: true
+          description: Instante para el cual se evalúa la vigencia, en formato RFC3339.
+      state_guards:
+        - field: status
+          equals: published
+        - field: enabled
+          equals: true
+    - id: IssueCoupon
+      title: Emitir cupón
+      kind: create
+      entity: Coupon
+      method: POST
+      path: /v1/coupons
+      emits: CuponEmitido
+      correlation:
+        coupon_code: code
+        promotion_id: promotion_id
+      parameters: []
+      state_guards:
+        - via: promotion_id
+          field: status
+          equals: published
+        - via: promotion_id
+          field: enabled
+          equals: true
+    - id: GetCoupon
+      title: Consultar cupón
+      kind: get
+      entity: Coupon
+      method: GET
+      path: /v1/coupons/{code}
+      emits: CuponConsultado
+      correlation:
+        coupon_code: code
+        promotion_id: promotion_id
+      parameters: []
+    - id: RedeemCoupon
+      title: Canjear cupón
+      kind: transition
+      entity: Coupon
+      method: POST
+      path: /v1/coupons/{code}/redeem
+      emits: CuponCanjeado
+      correlation:
+        coupon_code: code
+        promotion_id: promotion_id
+      parameters: []
+      transition:
+        field: status
+        from: issued
+        to: redeemed
+      state_guards:
+        - via: promotion_id
+          field: status
+          equals: published
+        - via: promotion_id
+          field: enabled
+          equals: true
+      precondition:
+        requires:
+          policy: PromotionValidity
+          via: promotion_id
+  policies:
+    - id: PromotionValidity
+      kind: active_between
+      entity: Promotion
+      start_field: starts_at
+      end_field: ends_at
+      enabled_field: enabled
+      inclusive_start: true
+      exclusive_end: true
+  flows:
+    - name: CatalogManagement
+      title: Gestión de catálogo
+      purpose: Crear, modificar, publicar, archivar, dar de baja y rehabilitar promociones administradas.
+      operations:
+        - CreatePromotion
+        - UpdatePromotion
+        - PublishPromotion
+        - ArchivePromotion
+        - DisablePromotion
+        - EnablePromotion
+    - name: CouponManagement
+      title: Gestión de cupones
+      purpose: Emitir cupones de una promoción publicada y habilitada, y registrar su canje único mientras la promoción sigue publicada, habilitada y vigente.
+      operations:
+        - IssueCoupon
+        - RedeemCoupon
+    - name: AuthorizationSupport
+      title: Soporte a autorizaciones
+      purpose: Informar vigencia, cuotas y descuento para asistir al equipo autorizador.
+      operations:
+        - GetPromotion
+        - ListPromotions
+        - CheckPromotionValidity
+        - GetCoupon
