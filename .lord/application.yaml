@@ -55,6 +55,31 @@ entities:
           - draft
           - published
           - archived
+  - name: Coupon
+    title: cupón
+    plural: coupons
+    id_field: code
+    storage: sqlite
+    fields:
+      - name: code
+        type: string
+        required: true
+        immutable: true
+      - name: promotion_id
+        type: string
+        required: true
+        immutable: true
+        references:
+          entity: Promotion
+          field: id
+      - name: status
+        type: string
+        required: false
+        immutable: true
+        default: issued
+        enum:
+          - issued
+          - redeemed
 operations:
   - id: CreatePromotion
     title: Crear promoción
@@ -221,6 +246,61 @@ operations:
         equals: published
       - field: enabled
         equals: true
+  - id: IssueCoupon
+    title: Emitir cupón
+    kind: create
+    entity: Coupon
+    method: POST
+    path: /v1/coupons
+    emits: CuponEmitido
+    correlation:
+      coupon_code: code
+      promotion_id: promotion_id
+    parameters: []
+    state_guards:
+      - via: promotion_id
+        field: status
+        equals: published
+      - via: promotion_id
+        field: enabled
+        equals: true
+  - id: GetCoupon
+    title: Consultar cupón
+    kind: get
+    entity: Coupon
+    method: GET
+    path: /v1/coupons/{code}
+    emits: CuponConsultado
+    correlation:
+      coupon_code: code
+      promotion_id: promotion_id
+    parameters: []
+  - id: RedeemCoupon
+    title: Canjear cupón
+    kind: transition
+    entity: Coupon
+    method: POST
+    path: /v1/coupons/{code}/redeem
+    emits: CuponCanjeado
+    correlation:
+      coupon_code: code
+      promotion_id: promotion_id
+    parameters: []
+    transition:
+      field: status
+      from: issued
+      to: redeemed
+    state_guards:
+      - via: promotion_id
+        field: status
+        equals: published
+      - via: promotion_id
+        field: enabled
+        equals: true
+    precondition:
+      requires:
+        policy: PromotionValidity
+        via: promotion_id
 policies:
   - id: PromotionValidity
     kind: active_between
@@ -241,6 +321,12 @@ flows:
       - ArchivePromotion
       - DisablePromotion
       - EnablePromotion
+  - name: CouponManagement
+    title: Gestión de cupones
+    purpose: Emitir cupones de una promoción publicada y habilitada, y registrar su canje único mientras la promoción sigue publicada, habilitada y vigente.
+    operations:
+      - IssueCoupon
+      - RedeemCoupon
   - name: AuthorizationSupport
     title: Soporte a autorizaciones
     purpose: Informar vigencia, cuotas y descuento para asistir al equipo autorizador.
@@ -248,3 +334,4 @@ flows:
       - GetPromotion
       - ListPromotions
       - CheckPromotionValidity
+      - GetCoupon

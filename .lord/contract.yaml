@@ -11,6 +11,9 @@ vocabulary:
     - PromocionRehabilitada
     - PromocionPublicada
     - PromocionArchivada
+    - CuponEmitido
+    - CuponConsultado
+    - CuponCanjeado
 rules:
   - id: CR-001
     description: Una promoción solo puede incorporarse una vez al catálogo por identificador.
@@ -130,3 +133,73 @@ rules:
     kind: prohibits_after
     trigger: PromocionArchivada
     prohibited: PromocionRehabilitada
+  - id: CR-018
+    description: Un cupón solo puede emitirse una vez por código.
+    correlate_by:
+      - coupon_code
+    kind: unique
+    event: CuponEmitido
+  - id: CR-019
+    description: Solo puede emitirse un cupón después de que su promoción fue publicada.
+    correlate_by:
+      - promotion_id
+    kind: only_after
+    event: CuponEmitido
+    required: PromocionPublicada
+  - id: CR-020
+    description: Un cupón solo puede consultarse después de haber sido emitido.
+    correlate_by:
+      - coupon_code
+    kind: only_after
+    event: CuponConsultado
+    required: CuponEmitido
+  - id: CR-021
+    description: Un cupón solo puede canjearse una vez.
+    correlate_by:
+      - coupon_code
+    kind: unique
+    event: CuponCanjeado
+  - id: CR-022
+    description: Un cupón solo puede canjearse después de que su promoción fue publicada.
+    correlate_by:
+      - promotion_id
+    kind: only_after
+    event: CuponCanjeado
+    required: PromocionPublicada
+  - id: CR-023
+    description: Un cupón de una promoción archivada ya no puede canjearse.
+    correlate_by:
+      - promotion_id
+    kind: prohibits_after
+    trigger: PromocionArchivada
+    prohibited: CuponCanjeado
+  - id: CR-024
+    description: Un cupón de una promoción dada de baja no puede canjearse hasta que sea rehabilitada.
+    correlate_by:
+      - promotion_id
+    kind: prohibits_between
+    trigger: PromocionDadaDeBaja
+    target: PromocionRehabilitada
+    prohibited: CuponCanjeado
+  - id: CR-025
+    description: Un cupón solo puede canjearse después de haber sido emitido.
+    correlate_by:
+      - coupon_code
+    kind: only_after
+    event: CuponCanjeado
+    required: CuponEmitido
+  - id: CR-026
+    description: Una promoción archivada ya no puede emitir cupones.
+    correlate_by:
+      - promotion_id
+    kind: prohibits_after
+    trigger: PromocionArchivada
+    prohibited: CuponEmitido
+  - id: CR-027
+    description: Una promoción dada de baja no puede emitir cupones hasta que sea rehabilitada.
+    correlate_by:
+      - promotion_id
+    kind: prohibits_between
+    trigger: PromocionDadaDeBaja
+    target: PromocionRehabilitada
+    prohibited: CuponEmitido

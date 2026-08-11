@@ -52,7 +52,7 @@ func NewTestDatabase() *sql.DB {
 // data: a fresh process over pre-existing rows has an incomplete event
 // history and must declare it.
 func DatabaseHasRows(db *sql.DB) (bool, error) {
-	for _, table := range []string{"promotions"} {
+	for _, table := range []string{"promotions", "coupons"} {
 		var populated int64
 		if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM " + table + " LIMIT 1)").Scan(&populated); err != nil {
 			if strings.Contains(err.Error(), "no such table") {
@@ -105,6 +105,35 @@ func MigrateDatabase(db *sql.DB) error {
 			}
 		}
 	}
+
+	{
+		if _, err := db.Exec("CREATE TABLE IF NOT EXISTS coupons (code TEXT NOT NULL PRIMARY KEY, promotion_id TEXT NOT NULL, status TEXT NOT NULL, FOREIGN KEY (promotion_id) REFERENCES promotions(id))"); err != nil {
+			return err
+		}
+		existing, err := tableColumns(db, "coupons")
+		if err != nil {
+			return err
+		}
+		expected := []struct{ name, clause string }{
+			{"code", "TEXT NOT NULL DEFAULT ''"},
+			{"promotion_id", "TEXT NOT NULL DEFAULT ''"},
+			{"status", "TEXT NOT NULL DEFAULT ''"},
+		}
+		known := map[string]bool{}
+		for _, column := range expected {
+			known[column.name] = true
+			if !existing[column.name] {
+				if _, err := db.Exec("ALTER TABLE coupons ADD COLUMN " + column.name + " " + column.clause); err != nil {
+					return err
+				}
+			}
+		}
+		for name := range existing {
+			if !known[name] {
+				return fmt.Errorf("table coupons has column %q outside the active contract; destructive migrations require explicit operator action", name)
+			}
+		}
+	}
 	return nil
 }
 
@@ -137,6 +166,9 @@ func (s *PromotionStore) Create(value domain.Promotion) error {
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return ErrAlreadyExists
+		}
+		if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+			return ErrInvalidReference
 		}
 		return err
 	}
@@ -193,6 +225,73 @@ func scanPromotion(row interface{ Scan(dest ...any) error }) (domain.Promotion, 
 	value.StartsAt = parseStoredTime(startsAtRaw)
 	value.EndsAt = parseStoredTime(endsAtRaw)
 	value.Enabled = enabledRaw != 0
+	return value, nil
+}
+
+type CouponStore struct{ db *sql.DB }
+
+func NewCouponStore(db *sql.DB) *CouponStore { return &CouponStore{db: db} }
+
+func (s *CouponStore) Create(value domain.Coupon) error {
+	_, err := s.db.Exec("INSERT INTO coupons (code, promotion_id, status) VALUES (?, ?, ?)", value.Code, value.PromotionId, value.Status)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrAlreadyExists
+		}
+		if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+			return ErrInvalidReference
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *CouponStore) Update(value domain.Coupon) error {
+	result, err := s.db.Exec("UPDATE coupons SET promotion_id = ?, status = ? WHERE code = ?", value.PromotionId, value.Status, value.Code)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *CouponStore) Get(id string) (domain.Coupon, error) {
+	return scanCoupon(s.db.QueryRow("SELECT code, promotion_id, status FROM coupons WHERE code = ?", id))
+}
+
+func (s *CouponStore) List() []domain.Coupon {
+	result := make([]domain.Coupon, 0)
+	rows, err := s.db.Query("SELECT code, promotion_id, status FROM coupons ORDER BY code")
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+	for rows.Next() {
+		value, err := scanCoupon(rows)
+		if err != nil {
+			return result
+		}
+		result = append(result, value)
+	}
+	return result
+}
+
+func scanCoupon(row interface{ Scan(dest ...any) error }) (domain.Coupon, error) {
+	var value domain.Coupon
+
+	if err := row.Scan(&value.Code, &value.PromotionId, &value.Status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Coupon{}, ErrNotFound
+		}
+		return domain.Coupon{}, err
+	}
+
 	return value, nil
 }
 

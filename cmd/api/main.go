@@ -27,7 +27,8 @@ func main() {
 		log.Fatal(err)
 	}
 	promotionStore := store.NewPromotionStore(db)
-	handler := httpapi.NewHandlerWithHistory(!hadRows, promotionStore)
+	couponStore := store.NewCouponStore(db)
+	handler := httpapi.NewHandlerWithHistory(!hadRows, promotionStore, couponStore)
 	log.Printf("promo-api listening on 127.0.0.1:8080")
 	log.Fatal(http.ListenAndServe("127.0.0.1:8080", handler))
 }
