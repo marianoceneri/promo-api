@@ -127,8 +127,14 @@ func TestPromotionContractFlow(t *testing.T) {
 	if len(events.Events) == 0 {
 		t.Fatal("expected structured LORD runtime events")
 	}
-	if events.Events[0].Data["promotion_id"] != "PROMO-TEST" {
-		t.Fatalf("missing runtime correlation: %#v", events.Events[0].Data)
+	correlated := false
+	for _, event := range events.Events {
+		if event.Type == "PromocionCreada" && event.Data["promotion_id"] == "PROMO-TEST" {
+			correlated = true
+		}
+	}
+	if !correlated {
+		t.Fatalf("missing runtime correlation for PromocionCreada: %#v", events.Events)
 	}
 }
 
@@ -270,11 +276,19 @@ func TestPromotionEnablePromotionPrecondition(t *testing.T) {
 func TestCouponContractFlow(t *testing.T) {
 	handler := newTestHandler()
 	{
-		setup := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
+		setup := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2999-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 		setupResponse := httptest.NewRecorder()
 		handler.ServeHTTP(setupResponse, setup)
 		if setupResponse.Code != http.StatusCreated {
 			t.Fatalf("referenced Promotion setup status = %d, body = %s", setupResponse.Code, setupResponse.Body.String())
+		}
+	}
+	{
+		setup := httptest.NewRequest(http.MethodPost, "/v1/promotions/PROMO-TEST/publish", nil)
+		setupResponse := httptest.NewRecorder()
+		handler.ServeHTTP(setupResponse, setup)
+		if setupResponse.Code != http.StatusOK {
+			t.Fatalf("referenced Promotion PublishPromotion setup status = %d, body = %s", setupResponse.Code, setupResponse.Body.String())
 		}
 	}
 	request := httptest.NewRequest(http.MethodPost, "/v1/coupons", bytes.NewReader([]byte("{\"code\":\"code-test\",\"promotion_id\":\"PROMO-TEST\",\"status\":\"issued\"}")))
@@ -322,7 +336,13 @@ func TestCouponContractFlow(t *testing.T) {
 	if len(events.Events) == 0 {
 		t.Fatal("expected structured LORD runtime events")
 	}
-	if events.Events[0].Data["coupon_code"] != "code-test" {
-		t.Fatalf("missing runtime correlation: %#v", events.Events[0].Data)
+	correlated := false
+	for _, event := range events.Events {
+		if event.Type == "CuponEmitido" && event.Data["coupon_code"] == "code-test" {
+			correlated = true
+		}
+	}
+	if !correlated {
+		t.Fatalf("missing runtime correlation for CuponEmitido: %#v", events.Events)
 	}
 }

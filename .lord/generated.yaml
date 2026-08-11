@@ -1,6 +1,6 @@
 version: "0.2"
 contract_id: sha256:d6666803d0fec55c76fb1bae88fb5a0778a35630d307a5e6c1315ef7c0022b96
-generated_at: 2026-08-11T18:37:12.775Z
+generated_at: 2026-08-11T18:45:10.008Z
 files:
   go.mod: sha256:b84d510aceda456ec094c6a7bfec199a22b555dda93dbf847c01f6e52503e249
   cmd/api/main.go: sha256:6fbb4bf76d1659ed47411bc44f2bfb10622f564456e28dc2ab1dba6cb48033cc
@@ -9,4 +9,4 @@ files:
   internal/store/sqlite.go: sha256:b075a0ed1e2493674b4af66571188faa9edf3fcb831cd8c4762775744aae6d55
   internal/observability/events.go: sha256:37dc8f7b014418396d87580bf61577e4130cef3b1eeb3fe9de487dd2e75cfdfc
   internal/httpapi/handler.go: sha256:e60b99ded1bdb4e727e98fb3cc73cf78bb0d585e56bb9364f62501f4c270b00b
-  internal/httpapi/handler_test.go: sha256:00d07ae71a023c8dd74e14e9f16744506086ad0704cbabc81bf9e81a847dd164
+  internal/httpapi/handler_test.go: sha256:a8ea3f9bf324aeaa607ff0cb55407f8b8428c3c6bd2009dd52a81139afe51655
