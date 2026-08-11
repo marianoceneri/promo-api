@@ -1,8 +1,9 @@
 # Promotion Manager API
 
 API REST en Go generada por LORD desde los contratos versionados en `.lord/`.
-Gestiona promociones en memoria y permite que un equipo autorizador consulte su
-vigencia, cuotas y descuento. Ya no cotiza carritos ni aplica promociones.
+Gestiona un catálogo de promociones persistido en disco y permite que un equipo
+autorizador consulte su vigencia, cuotas y descuento. Ya no cotiza carritos ni
+aplica promociones.
 
 ## Contratos
 
@@ -29,6 +30,19 @@ go run ./cmd/api
 ```
 
 El servicio escucha en `:8080`.
+
+## Persistencia
+
+El catálogo se guarda en SQLite. La entidad declara `storage: sqlite` en
+`.lord/application.yaml` y el contrato fija `./data/promotions.db` como ruta por
+defecto, sobrescribible con la variable de entorno `LORD_DATABASE_PATH`. El
+servicio crea el directorio y el esquema al arrancar y aplica migraciones
+aditivas automáticas; una columna presente en la base pero ausente del contrato
+aborta el arranque en lugar de aplicar una migración destructiva. Los datos
+sobreviven reinicios y caídas del proceso.
+
+La traza de eventos operacionales expuesta en `/_lord/events` sigue siendo en
+memoria: se reinicia con el proceso y no persiste junto con el catálogo.
 
 ## Ejemplo
 

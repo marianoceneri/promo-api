@@ -4,12 +4,15 @@ target:
   kind: go-rest
   module: github.com/marianoceneri/promo-api
   port: 8080
+  database:
+    kind: sqlite
+    path: ./data/promotions.db
 entities:
   - name: Promotion
     title: promoción
     plural: promotions
     id_field: id
-    storage: memory
+    storage: sqlite
     fields:
       - name: id
         type: string

@@ -4,13 +4,25 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/marianoceneri/promo-api/internal/httpapi"
 	"github.com/marianoceneri/promo-api/internal/store"
 )
 
 func main() {
-	promotionStore := store.NewPromotionStore()
+	databasePath := os.Getenv("LORD_DATABASE_PATH")
+	if databasePath == "" {
+		databasePath = "./data/promotions.db"
+	}
+	db, err := store.OpenDatabase(databasePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := store.MigrateDatabase(db); err != nil {
+		log.Fatal(err)
+	}
+	promotionStore := store.NewPromotionStore(db)
 	handler := httpapi.NewHandler(promotionStore)
 	log.Printf("promo-api listening on 127.0.0.1:8080")
 	log.Fatal(http.ListenAndServe("127.0.0.1:8080", handler))

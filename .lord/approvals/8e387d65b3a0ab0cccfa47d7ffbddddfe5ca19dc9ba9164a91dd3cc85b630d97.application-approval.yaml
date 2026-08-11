@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: application_contract_approval
+approval_id: sha256:8e387d65b3a0ab0cccfa47d7ffbddddfe5ca19dc9ba9164a91dd3cc85b630d97
+proposal_id: sha256:1ae14a6707fb4568c6e5c482ff6f3f7b662294b27a5acb999882b404853c2571
+source_contract_id: sha256:2bd8d79332dc900aa6d84172624104c006fecf4aaaeffb750c1d676bdbb9eee2
+contract_id: sha256:c434ffd85c23b1193f24005204900bd9369b656f50eb7a35c64eba613c01457e
+approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 5)"
+approved_at: 2026-08-11T15:59:30.407Z
+rationale: "Auditada contra la negociación d154405f (2/2 ratificadas): storage sqlite en Promotion y target.database ./data/promotions.db, sin ningún cambio de negocio — operaciones, guardas, preconditions y flujos intactos. Impacto acotado a la entidad y el target."

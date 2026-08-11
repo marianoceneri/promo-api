@@ -13,7 +13,7 @@ import (
 )
 
 func TestPromotionContractFlow(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore())
+	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -140,7 +140,7 @@ func TestPromotionInstallmentsContractBoundaries(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			handler := NewHandler(store.NewPromotionStore())
+			handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
 			request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte(test.body)))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -164,7 +164,7 @@ func TestPromotionDiscountPercentContractBoundaries(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			handler := NewHandler(store.NewPromotionStore())
+			handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
 			request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte(test.body)))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -176,7 +176,7 @@ func TestPromotionDiscountPercentContractBoundaries(t *testing.T) {
 }
 
 func TestPromotionEnabledIsImmutable(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore())
+	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -192,7 +192,7 @@ func TestPromotionEnabledIsImmutable(t *testing.T) {
 }
 
 func TestPromotionStatusIsImmutable(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore())
+	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -219,7 +219,7 @@ func TestPromotionCreatePromotionPrecondition(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			handler := NewHandler(store.NewPromotionStore())
+			handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
 			request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte(test.body)))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -231,7 +231,7 @@ func TestPromotionCreatePromotionPrecondition(t *testing.T) {
 }
 
 func TestPromotionUpdatePromotionPrecondition(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore())
+	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2999-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -247,7 +247,7 @@ func TestPromotionUpdatePromotionPrecondition(t *testing.T) {
 }
 
 func TestPromotionEnablePromotionPrecondition(t *testing.T) {
-	handler := NewHandler(store.NewPromotionStore())
+	handler := NewHandler(store.NewPromotionStore(store.NewTestDatabase()))
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-TRANSITION\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
