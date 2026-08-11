@@ -1,0 +1,8 @@
+version: "0.1"
+approvers:
+  # Identidad delegada: la clave la tiene el agente orquestador, no el titular.
+  # Todo lo que firme queda atribuido al delegado, con nombre propio.
+  - identity: claude-delegado
+    key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF0ndY7W3bwZcjnVVuwH/UVPZWmyt6X2wpkLU6EjE+NT marianoceneri"
+    aliases:
+      - "marianoceneri (delegado autorizado: Claude, ensayo 7)"

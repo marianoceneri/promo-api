@@ -7362,7 +7362,7 @@ var require_dist = __commonJS({
 });
 
 // src/workspace/check-cli.ts
-var import_node_util3 = require("node:util");
+var import_node_util4 = require("node:util");
 
 // src/analysis/analyzer.ts
 var AnalyzerUnavailableError = class extends Error {
@@ -7535,10 +7535,10 @@ function extractWitness(model, length, slots, events) {
 }
 
 // src/workspace/checker.ts
-var import_node_child_process2 = require("node:child_process");
-var import_promises8 = require("node:fs/promises");
-var import_node_util2 = require("node:util");
-var import_yaml12 = __toESM(require_dist(), 1);
+var import_node_child_process3 = require("node:child_process");
+var import_promises9 = require("node:fs/promises");
+var import_node_util3 = require("node:util");
+var import_yaml13 = __toESM(require_dist(), 1);
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -24839,7 +24839,14 @@ var governedApprovalSchema = external_exports.object({
   contract_id: external_exports.string().regex(/^sha256:[a-f0-9]{64}$/),
   approved_by: external_exports.string().min(1),
   approved_at: external_exports.string().datetime(),
-  rationale: external_exports.string().min(1)
+  rationale: external_exports.string().min(1),
+  /**
+   * Detached SSH signature over approval_id, produced by a key registered in
+   * .lord/approvers.yaml. Optional in the artifact so existing repositories
+   * keep verifying, but the gate reports an unsigned approval as
+   * unauthenticated once a registry exists.
+   */
+  signature: external_exports.string().min(1).optional()
 }).strict();
 async function loadGovernedApproval(path) {
   const approval = governedApprovalSchema.parse((0, import_yaml8.parse)(await (0, import_promises5.readFile)(path, "utf8")));
@@ -24866,14 +24873,100 @@ async function findGovernedApprovals(directory, kind, contractID) {
   return results;
 }
 function assertGovernedApprovalIntegrity(approval) {
-  const { approval_id: ignored, ...base } = approval;
+  const { approval_id: ignored, signature: alsoIgnored, ...base } = approval;
   void ignored;
+  void alsoIgnored;
   if (fingerprint(base) !== approval.approval_id) throw new Error("Approval fingerprint does not match its contents.");
 }
 
-// src/mcp/proposals.ts
+// src/governance/signing.ts
+var import_node_child_process2 = require("node:child_process");
 var import_promises6 = require("node:fs/promises");
+var import_node_os2 = require("node:os");
+var import_node_path4 = require("node:path");
+var import_node_util2 = require("node:util");
 var import_yaml9 = __toESM(require_dist(), 1);
+var execFileAsync2 = (0, import_node_util2.promisify)(import_node_child_process2.execFile);
+var SIGNATURE_NAMESPACE = "lord-approval";
+var approverRegistrySchema = external_exports.object({
+  version: external_exports.literal("0.1"),
+  approvers: external_exports.array(external_exports.object({
+    // A handle, not prose: SSH's allowed_signers format has no room for
+    // spaces, and an identity that cannot be written down unambiguously
+    // cannot authenticate anything.
+    identity: external_exports.string().regex(/^[A-Za-z0-9._@-]+$/),
+    key: external_exports.string().regex(/^(ssh-ed25519|ssh-rsa|ecdsa-sha2-\S+) \S+/),
+    /**
+     * Human-readable names this handle is allowed to sign under. Approvals
+     * record prose ("Ana, en representación de Riesgo"); the registry is where
+     * the operator states, explicitly, which prose belongs to which key.
+     */
+    aliases: external_exports.array(external_exports.string().min(1)).optional(),
+    domains: external_exports.array(external_exports.string().min(1)).optional()
+  }).strict()).min(1)
+}).strict();
+async function loadApproverRegistry(path) {
+  try {
+    return approverRegistrySchema.parse((0, import_yaml9.parse)(await (0, import_promises6.readFile)(path, "utf8")));
+  } catch (error51) {
+    if (typeof error51 === "object" && error51 && "code" in error51 && error51.code === "ENOENT") return null;
+    throw new Error(`The approver registry at ${path} is invalid: ${error51 instanceof Error ? error51.message : String(error51)}`);
+  }
+}
+var SigningUnavailableError = class extends Error {
+  constructor(reason) {
+    super(`Signature verification needs OpenSSH's ssh-keygen: ${reason}`);
+    this.name = "SigningUnavailableError";
+  }
+};
+function runWithInput(command, args, input) {
+  return new Promise((resolvePromise) => {
+    const child = (0, import_node_child_process2.spawn)(command, args, { stdio: ["pipe", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error51) => {
+      resolvePromise({ code: -1, stderr: error51.message, missingBinary: error51.code === "ENOENT" });
+    });
+    child.on("close", (code) => resolvePromise({ code: code ?? -1, stderr, missingBinary: false }));
+    child.stdin.end(input);
+  });
+}
+async function withTemporaryDirectory(action) {
+  const directory = await (0, import_promises6.mkdtemp)((0, import_node_path4.resolve)((0, import_node_os2.tmpdir)(), "lord-sign-"));
+  try {
+    return await action(directory);
+  } finally {
+    await (0, import_promises6.rm)(directory, { recursive: true, force: true });
+  }
+}
+async function verifyApprovalSignature(approvalID, signature, registry2, claimedIdentity) {
+  const approver = registry2.approvers.find((item) => item.identity === claimedIdentity || (item.aliases ?? []).includes(claimedIdentity));
+  if (!approver) {
+    return { verified: false, identity: null, reason: `'${claimedIdentity}' is not a registered approver` };
+  }
+  return withTemporaryDirectory(async (directory) => {
+    const payload = (0, import_node_path4.resolve)(directory, "payload");
+    const signaturePath = (0, import_node_path4.resolve)(directory, "payload.sig");
+    const allowed = (0, import_node_path4.resolve)(directory, "allowed_signers");
+    await (0, import_promises6.writeFile)(payload, approvalID, { mode: 384 });
+    await (0, import_promises6.writeFile)(signaturePath, signature, { mode: 384 });
+    await (0, import_promises6.writeFile)(allowed, registry2.approvers.map((item) => `${item.identity} ${item.key}`).join("\n") + "\n", { mode: 384 });
+    const outcome = await runWithInput(
+      "ssh-keygen",
+      ["-Y", "verify", "-f", allowed, "-I", approver.identity, "-n", SIGNATURE_NAMESPACE, "-s", signaturePath],
+      approvalID
+    );
+    if (outcome.missingBinary) throw new SigningUnavailableError(outcome.stderr);
+    if (outcome.code === 0) return { verified: true, identity: approver.identity, reason: null };
+    return { verified: false, identity: approver.identity, reason: "the signature does not match this approval and key" };
+  });
+}
+
+// src/mcp/proposals.ts
+var import_promises7 = require("node:fs/promises");
+var import_yaml10 = __toESM(require_dist(), 1);
 var proposalSchema = external_exports.object({
   version: external_exports.literal("0.1"),
   status: external_exports.literal("proposal"),
@@ -24895,7 +24988,7 @@ var proposalSchema = external_exports.object({
 async function loadContractProposal(workspace, proposalID) {
   if (!/^sha256:[a-f0-9]{64}$/.test(proposalID)) throw new Error("Invalid proposal id.");
   const path = resolveLordOutput(workspace, "proposals", `${proposalID.slice("sha256:".length)}.proposal.yaml`);
-  const raw = proposalSchema.parse((0, import_yaml9.parse)(await (0, import_promises6.readFile)(path, "utf8")));
+  const raw = proposalSchema.parse((0, import_yaml10.parse)(await (0, import_promises7.readFile)(path, "utf8")));
   const parsed = parseContract(JSON.stringify(raw.contract));
   if (!parsed.ok || !parsed.value) {
     throw new Error(`Contract proposal cannot be parsed by this engine (a newer engine may have written it; restart stale plugin servers after rebuilding): ${parsed.errors.join("; ")}`);
@@ -24909,11 +25002,11 @@ async function loadContractProposal(workspace, proposalID) {
 }
 
 // src/application/lifecycle.ts
-var import_promises7 = require("node:fs/promises");
-var import_yaml11 = __toESM(require_dist(), 1);
+var import_promises8 = require("node:fs/promises");
+var import_yaml12 = __toESM(require_dist(), 1);
 
 // src/application/negotiation.ts
-var import_yaml10 = __toESM(require_dist(), 1);
+var import_yaml11 = __toESM(require_dist(), 1);
 var alternativeSchema = external_exports.object({ choice: external_exports.number().int().positive(), answer: external_exports.string().min(1), consequence: external_exports.string().min(1) }).strict();
 var questionSchema = external_exports.object({
   question_id: external_exports.string().regex(/^AQ-[A-Z0-9-]+$/),
@@ -24962,7 +25055,7 @@ var proposalSchema2 = external_exports.object({
 async function loadApplicationProposal(workspace, proposalID) {
   if (!/^sha256:[a-f0-9]{64}$/.test(proposalID)) throw new Error("Invalid proposal id.");
   const path = resolveLordOutput(workspace, "proposals", `${proposalID.slice(7)}.application.yaml`);
-  const raw = proposalSchema2.parse((0, import_yaml11.parse)(await (0, import_promises7.readFile)(path, "utf8")));
+  const raw = proposalSchema2.parse((0, import_yaml12.parse)(await (0, import_promises8.readFile)(path, "utf8")));
   const parsed = parseApplicationContract(JSON.stringify(raw.contract));
   if (!parsed.ok) {
     throw new Error(`Application proposal contract cannot be parsed by this engine (a newer engine may have written it; restart stale plugin servers after rebuilding): ${parsed.errors.join("; ")}`);
@@ -24989,12 +25082,13 @@ var generatedManifestSchema = external_exports.object({
   generated_at: external_exports.string().datetime(),
   files: external_exports.record(external_exports.string(), external_exports.string().regex(/^sha256:[a-f0-9]{64}$/))
 }).strict();
-var execFileAsync2 = (0, import_node_util2.promisify)(import_node_child_process2.execFile);
+var execFileAsync3 = (0, import_node_util3.promisify)(import_node_child_process3.execFile);
 async function checkLordWorkspace(projectPath, options = {}) {
   const workspace = await loadLordWorkspace(projectPath);
   const operationalID = fingerprint(workspace.contract);
   const applicationID = workspace.application ? fingerprint(workspace.application) : null;
   const checks = [];
+  const activeApplicationApprovals = [];
   const operationalCandidates = await findGovernedApprovals(
     resolveLordOutput(workspace, "approvals"),
     "operational_contract_approval",
@@ -25045,6 +25139,7 @@ async function checkLordWorkspace(projectPath, options = {}) {
       } catch {
       }
     }
+    activeApplicationApprovals.push(...applicationApprovals.map((item) => item.approval));
     checks.push(check2(
       "application_approval",
       applicationApprovals.length > 0,
@@ -25070,6 +25165,10 @@ async function checkLordWorkspace(projectPath, options = {}) {
       checks.push(await generatedTestSuiteCheck(workspace.projectDirectory, workspace.application.target.kind));
     }
   }
+  checks.push(await approvalAuthenticationCheck(
+    resolveLordOutput(workspace, "approvers.yaml"),
+    [...operationalApprovals.map((item) => item.approval), ...activeApplicationApprovals]
+  ));
   return {
     verdict: checks.every((item) => item.verdict === "valid") ? "valid" : "violation",
     project: workspace.projectDirectory,
@@ -25078,12 +25177,54 @@ async function checkLordWorkspace(projectPath, options = {}) {
     checks
   };
 }
+async function approvalAuthenticationCheck(registryPath, approvals) {
+  let registry2;
+  try {
+    registry2 = await loadApproverRegistry(registryPath);
+  } catch (error51) {
+    return check2("approval_authentication", false, error51 instanceof Error ? error51.message : String(error51));
+  }
+  if (!registry2) {
+    return check2(
+      "approval_authentication",
+      true,
+      "Approvals are audit metadata, not authenticated: no approver registry (.lord/approvers.yaml) exists in this workspace.",
+      { status: "unauthenticated" }
+    );
+  }
+  if (approvals.length === 0) {
+    return check2("approval_authentication", true, "There are no active approvals to authenticate.", { status: "empty" });
+  }
+  const results = [];
+  for (const approval of approvals) {
+    if (!approval.signature) {
+      results.push({ approval_id: approval.approval_id, approved_by: approval.approved_by, verified: false, reason: "the approval carries no signature" });
+      continue;
+    }
+    try {
+      const verification = await verifyApprovalSignature(approval.approval_id, approval.signature, registry2, approval.approved_by);
+      results.push({ approval_id: approval.approval_id, approved_by: approval.approved_by, verified: verification.verified, reason: verification.reason });
+    } catch (error51) {
+      if (error51 instanceof SigningUnavailableError) {
+        return check2("approval_authentication", true, `Signatures were not verified: ${error51.message}`, { status: "skipped" });
+      }
+      throw error51;
+    }
+  }
+  const failed = results.filter((item) => !item.verified);
+  return check2(
+    "approval_authentication",
+    failed.length === 0,
+    failed.length === 0 ? "Every active approval carries a valid signature from a registered approver." : "An active approval is not authenticated by a registered approver.",
+    failed.length === 0 ? results : failed
+  );
+}
 async function generatedTestSuiteCheck(projectDirectory, targetKind) {
   if (targetKind !== "go-rest") {
     return check2("generated_test_suite", true, `Test execution is not implemented for target '${targetKind}'; the suite was not run.`, { status: "skipped" });
   }
   try {
-    await execFileAsync2("go", ["test", "./..."], { cwd: projectDirectory, timeout: 12e4 });
+    await execFileAsync3("go", ["test", "./..."], { cwd: projectDirectory, timeout: 12e4 });
     return check2("generated_test_suite", true, "The generated Go test suite passes.");
   } catch (error51) {
     const output = typeof error51 === "object" && error51 ? `${"stdout" in error51 ? String(error51.stdout) : ""}
@@ -25116,7 +25257,7 @@ function check2(id, valid, message, details) {
 }
 async function readGeneratedManifest(path) {
   try {
-    return generatedManifestSchema.parse((0, import_yaml12.parse)(await (0, import_promises8.readFile)(path, "utf8")));
+    return generatedManifestSchema.parse((0, import_yaml13.parse)(await (0, import_promises9.readFile)(path, "utf8")));
   } catch (error51) {
     if (typeof error51 === "object" && error51 && "code" in error51 && error51.code === "ENOENT") return null;
     return null;
@@ -25125,7 +25266,7 @@ async function readGeneratedManifest(path) {
 
 // src/workspace/check-cli.ts
 async function main() {
-  const options = (0, import_node_util3.parseArgs)({
+  const options = (0, import_node_util4.parseArgs)({
     args: process.argv.slice(2),
     options: { project: { type: "string" }, json: { type: "boolean", default: false }, "run-tests": { type: "boolean", default: false } },
     allowPositionals: true,

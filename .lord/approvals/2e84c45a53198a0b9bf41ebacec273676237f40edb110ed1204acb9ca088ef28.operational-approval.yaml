@@ -8,3 +8,10 @@ contract_id: sha256:a8e9a9a0547e8b36b075c34700358f3729349f76130a4399870f1ae623e6
 approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 7)"
 approved_at: 2026-08-11T19:23:25.746Z
 rationale: "Incorpora CarritoCotizado al vocabulario sin reglas de orden, fiel al criterio ratificado: un carrito multi-promoción no tiene identidad única de correlación, así que cualquier regla de precedencia quedaría indeterminada justo en el caso habilitado. Las 27 reglas vigentes quedan intactas."
+signature: |
+  -----BEGIN SSH SIGNATURE-----
+  U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgXSd1jtbdvBlyOdVW7Af9RU9lab
+  K3pfbCmQtToSMT41MAAAANbG9yZC1hcHByb3ZhbAAAAAAAAAAGc2hhNTEyAAAAUwAAAAtz
+  c2gtZWQyNTUxOQAAAECjA4MG4nGpOJGfgzB8gl3Et+bXj32N0ZvYl3Geagbi7B/xLm/0le
+  ctZ5P085QiWd9WYxuM/8hvX9+i7gxCpcYC
+  -----END SSH SIGNATURE-----

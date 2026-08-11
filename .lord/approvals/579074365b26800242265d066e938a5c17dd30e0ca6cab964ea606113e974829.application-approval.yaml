@@ -8,3 +8,10 @@ contract_id: sha256:31cd1a6338b8b2d1f81c07e1f3d49e61d73018e88aba0cb493c003ed6a9b
 approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 7)"
 approved_at: 2026-08-11T19:40:10.574Z
 rationale: "Cotización de carritos como computación gobernada: formas del carrito y del resultado, cuatro invariantes verificados en cada respuesta (descuento no negativo, topado por el subtotal, total consistente y desglose que suma) y los tres ejemplos ratificados por el operador con su catálogo declarado. El algoritmo de selección y acumulación queda fuera de la generación, como corresponde: LORD verifica que la cuenta cierre, no qué combinación es la mejor."
+signature: |
+  -----BEGIN SSH SIGNATURE-----
+  U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgXSd1jtbdvBlyOdVW7Af9RU9lab
+  K3pfbCmQtToSMT41MAAAANbG9yZC1hcHByb3ZhbAAAAAAAAAAGc2hhNTEyAAAAUwAAAAtz
+  c2gtZWQyNTUxOQAAAEAYVKb0vmVrffVELYVRcUyoBD7Px+jvXcSsArzEbcbMRzLhyT4YDm
+  zLOE8XKCv9yq/0wHAMUBXfwLAmzuPF6aEE
+  -----END SSH SIGNATURE-----
