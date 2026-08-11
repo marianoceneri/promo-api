@@ -32,6 +32,8 @@ func NewHandler(promotions *store.PromotionStore) http.Handler {
 	})
 	mux.HandleFunc("POST /v1/promotions", handler.createPromotion)
 	mux.HandleFunc("PUT /v1/promotions/{id}", handler.updatePromotion)
+	mux.HandleFunc("POST /v1/promotions/{id}/publish", handler.publishPromotion)
+	mux.HandleFunc("POST /v1/promotions/{id}/archive", handler.archivePromotion)
 	mux.HandleFunc("POST /v1/promotions/{id}/disable", handler.disablePromotion)
 	mux.HandleFunc("POST /v1/promotions/{id}/enable", handler.enablePromotion)
 	mux.HandleFunc("GET /v1/promotions/{id}", handler.getPromotion)
@@ -84,6 +86,10 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "operation requires enabled=true")
 		return
 	}
+	if current.Status != "draft" && current.Status != "published" {
+		writeError(w, http.StatusConflict, "operation requires status in [draft published]")
+		return
+	}
 	var value domain.Promotion
 	if err := decodeJSON(r, &value); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -99,6 +105,10 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 	}
 	if current.Enabled != value.Enabled {
 		writeError(w, http.StatusConflict, "enabled is immutable")
+		return
+	}
+	if current.Status != value.Status {
+		writeError(w, http.StatusConflict, "status is immutable")
 		return
 	}
 	applyPromotionDefaults(&value)
@@ -118,6 +128,54 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-LORD-Event", "PromocionActualizada")
 	h.events.Record("PromocionActualizada", map[string]any{"promotion_id": value.Id})
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (h *Handler) publishPromotion(w http.ResponseWriter, r *http.Request) {
+	value, err := h.promotions.Get(r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not get promotion")
+		return
+	}
+	if value.Status != "draft" {
+		writeError(w, http.StatusConflict, "transition requires status=draft")
+		return
+	}
+	value.Status = "published"
+	if err := h.promotions.Update(value); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not transition promotion")
+		return
+	}
+	w.Header().Set("X-LORD-Event", "PromocionPublicada")
+	h.events.Record("PromocionPublicada", map[string]any{"promotion_id": value.Id})
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (h *Handler) archivePromotion(w http.ResponseWriter, r *http.Request) {
+	value, err := h.promotions.Get(r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not get promotion")
+		return
+	}
+	if value.Status != "published" {
+		writeError(w, http.StatusConflict, "transition requires status=published")
+		return
+	}
+	value.Status = "archived"
+	if err := h.promotions.Update(value); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not transition promotion")
+		return
+	}
+	w.Header().Set("X-LORD-Event", "PromocionArchivada")
+	h.events.Record("PromocionArchivada", map[string]any{"promotion_id": value.Id})
 	writeJSON(w, http.StatusOK, value)
 }
 
@@ -207,6 +265,17 @@ func (h *Handler) listPromotions(w http.ResponseWriter, r *http.Request) {
 		}
 		values = filtered
 	}
+	raw1 := r.URL.Query().Get("status")
+	if raw1 != "" {
+		filter1 := raw1
+		filtered := values[:0]
+		for _, value := range values {
+			if value.Status == filter1 {
+				filtered = append(filtered, value)
+			}
+		}
+		values = filtered
+	}
 	w.Header().Set("X-LORD-Event", "CatalogoConsultado")
 	h.events.Record("CatalogoConsultado", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"promotions": values})
@@ -220,6 +289,10 @@ func (h *Handler) checkPromotionValidity(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "could not get promotion")
+		return
+	}
+	if value.Status != "published" {
+		writeError(w, http.StatusConflict, "operation requires status=published")
 		return
 	}
 	if value.Enabled != true {
@@ -238,7 +311,9 @@ func (h *Handler) checkPromotionValidity(w http.ResponseWriter, r *http.Request)
 }
 
 func applyPromotionDefaults(value *domain.Promotion) {
-	// No defaults.
+	if value.Status == "" {
+		value.Status = "draft"
+	}
 }
 
 func validatePromotion(value domain.Promotion) error {
@@ -265,6 +340,9 @@ func validatePromotion(value domain.Promotion) error {
 	}
 	if value.DiscountPercent > 100 {
 		return fmt.Errorf("discount_percent must be at most 100")
+	}
+	if !map[string]bool{"draft": true, "published": true, "archived": true}[value.Status] {
+		return errors.New("status has an unsupported value")
 	}
 	if !value.StartsAt.Before(value.EndsAt) {
 		return errors.New("starts_at must precede ends_at")

@@ -1,0 +1,117 @@
+version: "0.3"
+kind: application_negotiation
+negotiation_id: sha256:057d7d18bf332caa3810501b75bbb1515203f9c7fc0d04f8a53ab4742bb69969
+source_contract_id: sha256:566bb9fd1216b09c973fb45102375a522df9c0719ecaa3be0b2f7c3350e16afc
+request: "El ciclo de vida de una promoción debe ser explícito: nace en estado borrador, puede publicarse, y una promoción publicada puede archivarse; el archivado es definitivo. Solo las promociones publicadas participan del soporte a autorizaciones (consulta de vigencia)."
+requested_by: marianoceneri
+created_at: 2026-08-11T15:11:01.774Z
+questions:
+  - question_id: AQ-LIFECYCLE-REPLACE
+    question: ¿Publicar/archivar reemplazan la capacidad vigente de baja y rehabilitación, o conviven con ella?
+    alternatives:
+      - choice: 1
+        answer: "Reemplazan: se eliminan Dar de baja y Rehabilitar, y sus eventos PromocionDadaDeBaja y PromocionRehabilitada salen del vocabulario."
+        consequence: El catálogo queda con un único ciclo de vida borrador→publicada→archivada. Se pierde la reversibilidad ratificada previamente; las trazas históricas con eventos de baja dejan de pertenecer al vocabulario activo.
+      - choice: 2
+        answer: "Conviven: una promoción publicada puede además darse de baja y rehabilitarse mientras no esté archivada."
+        consequence: Dos dimensiones de estado simultáneas (publicada/archivada y habilitada). La consulta de vigencia solo puede guardar en el borde una de las dos condiciones booleanas; el resto queda como regla de traza.
+  - question_id: AQ-CREATE-STATE
+    question: ¿La creación puede nacer directamente publicada, o siempre nace en borrador?
+    alternatives:
+      - choice: 1
+        answer: Siempre nace en borrador; publicar es la única vía para llegar a publicada.
+        consequence: "Es la intención declarada, pero el generador no admite defaults booleanos: el campo queda opcional y la ausencia se interpreta como borrador, sin poder rechazar en el borde un alta que envíe publicada=true. El respaldo es la regla de traza que exige PromocionPublicada antes de consultar vigencia."
+      - choice: 2
+        answer: Se admite el alta directa como publicada, conservando el alta administrativa con activación inmediata del contrato vigente.
+        consequence: Se conserva la capacidad actual, pero el estado borrador deja de ser obligatorio y la creación necesita la precondición de no publicar una promoción ya vencida.
+  - question_id: AQ-UPDATE-STATE
+    question: ¿En qué estados puede modificarse una promoción?
+    alternatives:
+      - choice: 1
+        answer: En borrador y en publicada; nunca archivada.
+        consequence: La guarda de la modificación es archivada=false y la regla de traza prohíbe PromocionActualizada después de PromocionArchivada.
+      - choice: 2
+        answer: Solo en borrador; una vez publicada queda congelada.
+        consequence: La guarda de la modificación es publicada=false. Archivada implica publicada=true, de modo que la misma guarda cubre ambos casos con una sola condición booleana.
+  - question_id: AQ-REPEATED
+    question: ¿Qué debe ocurrir ante un pedido repetido en el estado actual (publicar una promoción ya publicada, archivar una ya archivada)?
+    alternatives:
+      - choice: 1
+        answer: "Rechazo explícito: la transición solo es válida desde el estado de origen."
+        consequence: "Comportamiento nativo de las transiciones: 409 sin emitir evento, y regla de unicidad por identificador en la traza."
+      - choice: 2
+        answer: Aceptación idempotente sin cambio de estado.
+        consequence: "No es expresable: una transición declara origen y destino, y el generador rechaza el pedido fuera del estado de origen."
+  - question_id: AQ-GENERIC-UPDATE
+    question: ¿La modificación genérica puede escribir los campos de ciclo de vida?
+    alternatives:
+      - choice: 1
+        answer: "No: publicar y archivar son las únicas vías de cambio de estado."
+        consequence: Los campos se marcan inmutables; la modificación genérica los preserva y solo las transiciones dedicadas los cambian emitiendo su evento.
+      - choice: 2
+        answer: "Sí: la modificación genérica puede cambiar el estado del ciclo de vida."
+        consequence: El cambio de estado puede ocurrir sin emitir el evento dedicado, y las reglas de traza dejan de reflejar el ciclo de vida real.
+  - question_id: AQ-ARCHIVED-READS
+    question: ¿Qué operaciones de lectura siguen disponibles sobre una promoción archivada?
+    alternatives:
+      - choice: 1
+        answer: Consulta de características y listado siguen disponibles; solo se bloquea la consulta de vigencia.
+        consequence: El archivo queda auditable. El listado ofrece filtros tipados por publicada y por archivada.
+      - choice: 2
+        answer: La promoción archivada desaparece del soporte a autorizaciones por completo, incluida la consulta de características.
+        consequence: La consulta de características necesita también una guarda de estado, y el equipo autorizador pierde el acceso al detalle histórico.
+  - question_id: AQ-VALIDITY-GUARD
+    question: La consulta de vigencia debe excluir borradores y archivadas, pero una guarda de estado solo compara un campo booleano contra un literal. ¿Qué condición se enforcea en el borde de la API?
+    alternatives:
+      - choice: 1
+        answer: Guardar publicada=true en el borde; la exclusión de archivadas queda como regla de traza verificada por el runtime.
+        consequence: Un borrador recibe rechazo inmediato; una archivada responde vigencia y la violación se detecta en la verificación de traza, no en el borde.
+      - choice: 2
+        answer: Guardar archivada=false en el borde; la exigencia de publicación queda como regla de traza.
+        consequence: Una archivada recibe rechazo inmediato; un borrador responde vigencia y la violación se detecta en la verificación de traza.
+      - choice: 3
+        answer: "Ninguna de las dos es aceptable: se requiere conjunción de condiciones en el borde."
+        consequence: No expresable con el esquema de aplicación vigente; el pedido queda registrado como limitación del motor y el cambio no avanza hasta que exista la capacidad.
+decisions:
+  - question_id: AQ-LIFECYCLE-REPLACE
+    revision: 1
+    choice: 2
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 4)"
+    rationale: "Conviven: la baja/rehabilitación ratificada en la negociación 47b30914 se conserva. El ciclo editorial (borrador/publicada/archivada) y la disponibilidad operativa (enabled) son dimensiones distintas; el archivado es definitivo y prevalece."
+    decided_at: 2026-08-11T15:18:14.477Z
+  - question_id: AQ-CREATE-STATE
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 4)"
+    rationale: Siempre nace en borrador; publicar es la única vía a publicada. Si el borde no puede rechazar un alta con estado explícito distinto, el agente debe declararlo y respaldarlo con la regla operacional de publicación.
+    decided_at: 2026-08-11T15:18:14.484Z
+  - question_id: AQ-UPDATE-STATE
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 4)"
+    rationale: Modificable en borrador y publicada; nunca archivada. Las restricciones vigentes sobre promociones dadas de baja (negociación 47b30914) se mantienen.
+    decided_at: 2026-08-11T15:18:14.487Z
+  - question_id: AQ-REPEATED
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 4)"
+    rationale: "Rechazo explícito: cada transición declara su estado de origen; el pedido fuera de ese estado responde 409 sin emitir evento."
+    decided_at: 2026-08-11T15:18:14.491Z
+  - question_id: AQ-GENERIC-UPDATE
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 4)"
+    rationale: "Solo las transiciones dedicadas cambian el ciclo de vida: el campo de estado queda immutable para la modificación genérica, preservando la emisión de eventos y el sujeto de las reglas operacionales."
+    decided_at: 2026-08-11T15:18:14.494Z
+  - question_id: AQ-ARCHIVED-READS
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 4)"
+    rationale: Consulta de características y listado siguen disponibles sobre archivadas; solo se bloquea la consulta de vigencia.
+    decided_at: 2026-08-11T15:18:14.496Z
+  - question_id: AQ-VALIDITY-GUARD
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 4)"
+    rationale: "La premisa de esta pregunta quedó superada: el motor 0.5.0 admite estados enumerados, por lo que un único campo status con guarda equals=published excluye a la vez borradores y archivadas, sin dividir la garantía. Se ratifica que la condición de borde es estado=publicada. Si la conjunción con la guarda vigente enabled=true (negociación 47b30914) no resulta expresable en una misma operación, el agente debe declararlo explícitamente sin debilitar ninguna de las dos ratificaciones."
+    decided_at: 2026-08-11T15:18:14.499Z

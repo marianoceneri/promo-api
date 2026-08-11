@@ -11,4 +11,5 @@ type Promotion struct {
 	Installments    int64     `json:"installments"`
 	DiscountPercent int64     `json:"discount_percent"`
 	Enabled         bool      `json:"enabled"`
+	Status          string    `json:"status"`
 }

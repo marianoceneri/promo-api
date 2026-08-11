@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: operational_contract_approval
+approval_id: sha256:f024827a1747b67e713e4fcd4b9e2b11fbdd9453e0db762192e5b20603bced1d
+proposal_id: sha256:38e479fd58f44e3c3256c812f3d7e59d8f5fce44d1e8a3fe6cf9da9e6d3748da
+source_contract_id: sha256:1fb3d8fab55cf1fc01d7a8278dd30b152d40fb460b6c97dddde63f4a657f73a8
+contract_id: sha256:7b2a2ff0433f420f889d35a9f17537f99a8624c99dc14d298542bf2b6bd0771a
+approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 4)"
+approved_at: 2026-08-11T15:27:01.469Z
+rationale: CR-009..CR-017 reflejan las 7 decisiones ratificadas de la negociación 057d7d18, incluidas CR-016/CR-017 que materializan el racional 'el archivado es definitivo y prevalece'. Z3 consistente sin eventos muertos; CR-001..CR-008 intactas.

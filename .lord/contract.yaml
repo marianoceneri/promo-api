@@ -9,6 +9,8 @@ vocabulary:
     - VigenciaConsultada
     - PromocionDadaDeBaja
     - PromocionRehabilitada
+    - PromocionPublicada
+    - PromocionArchivada
 rules:
   - id: CR-001
     description: Una promoción solo puede incorporarse una vez al catálogo por identificador.
@@ -67,3 +69,64 @@ rules:
     trigger: PromocionDadaDeBaja
     target: PromocionRehabilitada
     prohibited: VigenciaConsultada
+  - id: CR-009
+    description: Una promoción solo puede publicarse después de haber sido creada como borrador.
+    correlate_by:
+      - promotion_id
+    kind: only_after
+    event: PromocionPublicada
+    required: PromocionCreada
+  - id: CR-010
+    description: "Una promoción solo puede publicarse una vez: no hay retorno a borrador."
+    correlate_by:
+      - promotion_id
+    kind: unique
+    event: PromocionPublicada
+  - id: CR-011
+    description: Una promoción solo puede archivarse después de haber sido publicada.
+    correlate_by:
+      - promotion_id
+    kind: only_after
+    event: PromocionArchivada
+    required: PromocionPublicada
+  - id: CR-012
+    description: "El archivado de una promoción es definitivo: solo puede ocurrir una vez."
+    correlate_by:
+      - promotion_id
+    kind: unique
+    event: PromocionArchivada
+  - id: CR-013
+    description: Una promoción archivada ya no puede modificarse.
+    correlate_by:
+      - promotion_id
+    kind: prohibits_after
+    trigger: PromocionArchivada
+    prohibited: PromocionActualizada
+  - id: CR-014
+    description: La vigencia de una promoción solo puede evaluarse después de publicarla.
+    correlate_by:
+      - promotion_id
+    kind: only_after
+    event: VigenciaConsultada
+    required: PromocionPublicada
+  - id: CR-015
+    description: "Una promoción archivada queda fuera del soporte a autorizaciones: su vigencia ya no puede evaluarse."
+    correlate_by:
+      - promotion_id
+    kind: prohibits_after
+    trigger: PromocionArchivada
+    prohibited: VigenciaConsultada
+  - id: CR-016
+    description: "El archivado prevalece sobre la disponibilidad operativa: una promoción archivada ya no puede darse de baja."
+    correlate_by:
+      - promotion_id
+    kind: prohibits_after
+    trigger: PromocionArchivada
+    prohibited: PromocionDadaDeBaja
+  - id: CR-017
+    description: "El archivado prevalece sobre la disponibilidad operativa: una promoción archivada ya no puede rehabilitarse."
+    correlate_by:
+      - promotion_id
+    kind: prohibits_after
+    trigger: PromocionArchivada
+    prohibited: PromocionRehabilitada

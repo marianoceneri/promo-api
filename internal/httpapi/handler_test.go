@@ -14,7 +14,7 @@ import (
 
 func TestPromotionContractFlow(t *testing.T) {
 	handler := NewHandler(store.NewPromotionStore())
-	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}")))
+	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
@@ -35,20 +35,62 @@ func TestPromotionContractFlow(t *testing.T) {
 	request = httptest.NewRequest(http.MethodGet, "/v1/promotions/PROMO-TEST/validity?at=2030-06-01T00%3A00%3A00Z", nil)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("guarded validity status = %d, want 409, body = %s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/v1/promotions/PROMO-TEST/publish", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
-		t.Fatalf("validity status = %d, body = %s", response.Code, response.Body.String())
+		t.Fatalf("PublishPromotion status = %d, body = %s", response.Code, response.Body.String())
 	}
-	var result struct {
-		Valid bool `json:"valid"`
+	if response.Header().Get("X-LORD-Event") != "PromocionPublicada" {
+		t.Fatal("PublishPromotion did not emit its contractual event")
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
+	request = httptest.NewRequest(http.MethodGet, "/v1/promotions?status=published", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "PROMO-TEST") {
+		t.Fatalf("ListPromotions matching filter did not return transitioned entity: %s", response.Body.String())
 	}
-	if !result.Valid {
-		t.Fatal("expected generated fixture to be valid")
+	request = httptest.NewRequest(http.MethodGet, "/v1/promotions?status=draft", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "PROMO-TEST") {
+		t.Fatalf("ListPromotions opposite filter returned transitioned entity: %s", response.Body.String())
 	}
-	if response.Header().Get("X-LORD-Event") != "VigenciaConsultada" {
-		t.Fatal("validity check did not emit its contractual event")
+	request = httptest.NewRequest(http.MethodPost, "/v1/promotions/PROMO-TEST/archive", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("ArchivePromotion status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("X-LORD-Event") != "PromocionArchivada" {
+		t.Fatal("ArchivePromotion did not emit its contractual event")
+	}
+	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMO-TEST", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("UpdatePromotion after ArchivePromotion status = %d, want 409", response.Code)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/promotions/PROMO-TEST/validity?at=2030-06-01T00%3A00%3A00Z", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("CheckPromotionValidity after ArchivePromotion status = %d, want 409", response.Code)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/promotions?status=archived", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "PROMO-TEST") {
+		t.Fatalf("ListPromotions matching filter did not return transitioned entity: %s", response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/promotions?status=draft", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "PROMO-TEST") {
+		t.Fatalf("ListPromotions opposite filter returned transitioned entity: %s", response.Body.String())
 	}
 	request = httptest.NewRequest(http.MethodPost, "/v1/promotions/PROMO-TEST/disable", nil)
 	response = httptest.NewRecorder()
@@ -59,7 +101,7 @@ func TestPromotionContractFlow(t *testing.T) {
 	if response.Header().Get("X-LORD-Event") != "PromocionDadaDeBaja" {
 		t.Fatal("DisablePromotion did not emit its contractual event")
 	}
-	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMO-TEST", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}")))
+	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMO-TEST", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
@@ -133,10 +175,10 @@ func TestPromotionInstallmentsContractBoundaries(t *testing.T) {
 		body string
 		want int
 	}{
-		{name: "minimum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}", want: http.StatusCreated},
-		{name: "below_minimum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-below_minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":0,\"discount_percent\":1,\"enabled\":true}", want: http.StatusBadRequest},
-		{name: "maximum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":48,\"discount_percent\":1,\"enabled\":true}", want: http.StatusCreated},
-		{name: "above_maximum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-above_maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":49,\"discount_percent\":1,\"enabled\":true}", want: http.StatusBadRequest},
+		{name: "minimum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusCreated},
+		{name: "below_minimum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-below_minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":0,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusBadRequest},
+		{name: "maximum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":48,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusCreated},
+		{name: "above_maximum", body: "{\"id\":\"PROMOTION-INSTALLMENTS-above_maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":49,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusBadRequest},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -157,10 +199,10 @@ func TestPromotionDiscountPercentContractBoundaries(t *testing.T) {
 		body string
 		want int
 	}{
-		{name: "minimum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":0,\"enabled\":true}", want: http.StatusCreated},
-		{name: "below_minimum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-below_minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":-1,\"enabled\":true}", want: http.StatusBadRequest},
-		{name: "maximum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":100,\"enabled\":true}", want: http.StatusCreated},
-		{name: "above_maximum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-above_maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":101,\"enabled\":true}", want: http.StatusBadRequest},
+		{name: "minimum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":0,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusCreated},
+		{name: "below_minimum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-below_minimum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":-1,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusBadRequest},
+		{name: "maximum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":100,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusCreated},
+		{name: "above_maximum", body: "{\"id\":\"PROMOTION-DISCOUNTPERCENT-above_maximum\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":101,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusBadRequest},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -177,13 +219,29 @@ func TestPromotionDiscountPercentContractBoundaries(t *testing.T) {
 
 func TestPromotionEnabledIsImmutable(t *testing.T) {
 	handler := NewHandler(store.NewPromotionStore())
-	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}")))
+	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create status = %d", response.Code)
 	}
-	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMO-TEST", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false}")))
+	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMO-TEST", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false,\"status\":\"draft\"}")))
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("immutable update status = %d, want 409", response.Code)
+	}
+}
+
+func TestPromotionStatusIsImmutable(t *testing.T) {
+	handler := NewHandler(store.NewPromotionStore())
+	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status = %d", response.Code)
+	}
+	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMO-TEST", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft-changed\"}")))
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
@@ -197,9 +255,9 @@ func TestPromotionCreatePromotionPrecondition(t *testing.T) {
 		body string
 		want int
 	}{
-		{name: "expired_blocked", body: "{\"id\":\"PROMOTION-PRE-EXPIRED\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}", want: http.StatusConflict},
-		{name: "future_allowed", body: "{\"id\":\"PROMOTION-PRE-FUTURE\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2999-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}", want: http.StatusCreated},
-		{name: "expired_unguarded_allowed", body: "{\"id\":\"PROMOTION-PRE-UNGUARDED\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false}", want: http.StatusCreated},
+		{name: "expired_blocked", body: "{\"id\":\"PROMOTION-PRE-EXPIRED\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusConflict},
+		{name: "future_allowed", body: "{\"id\":\"PROMOTION-PRE-FUTURE\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2999-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}", want: http.StatusCreated},
+		{name: "expired_unguarded_allowed", body: "{\"id\":\"PROMOTION-PRE-UNGUARDED\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false,\"status\":\"draft\"}", want: http.StatusCreated},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -216,13 +274,13 @@ func TestPromotionCreatePromotionPrecondition(t *testing.T) {
 
 func TestPromotionUpdatePromotionPrecondition(t *testing.T) {
 	handler := NewHandler(store.NewPromotionStore())
-	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2999-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}")))
+	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2999-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String())
 	}
-	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMOTION-PRE-UPDATE", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}")))
+	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMOTION-PRE-UPDATE", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
@@ -232,7 +290,7 @@ func TestPromotionUpdatePromotionPrecondition(t *testing.T) {
 
 func TestPromotionEnablePromotionPrecondition(t *testing.T) {
 	handler := NewHandler(store.NewPromotionStore())
-	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-TRANSITION\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false}")))
+	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-TRANSITION\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {

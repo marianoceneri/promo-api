@@ -1,0 +1,259 @@
+version: "0.2"
+kind: application_contract
+status: proposal
+proposal_id: sha256:1fe1af5a6a24781acc9bec6db4de73dca5ab565b3e1da714104110557388a522
+source_contract_id: sha256:566bb9fd1216b09c973fb45102375a522df9c0719ecaa3be0b2f7c3350e16afc
+proposed_contract_id: sha256:1f90afe930c9ea2e6b5f6dc45f7499b776686d652f6bf779d15bea1efcdd0c2d
+proposed_by: Claude (agente), por pedido de marianoceneri
+rationale: 'Implementa las 7 decisiones ratificadas en la negociación sha256:057d7d18 usando el estado enumerado que habilita el motor 0.5.0. Campo status (enum draft/published/archived, default draft, immutable) que convive con el booleano enabled (AQ-LIFECYCLE-REPLACE=2): el ciclo editorial y la disponibilidad operativa quedan como dimensiones separadas, y ninguna operación vigente se elimina. El default draft hace que una promoción nazca en borrador cuando el campo se omite (AQ-CREATE-STATE=1); el borde no puede rechazar un alta que envíe un estado explícito distinto, y el respaldo es CR-014 en la traza. PublishPromotion (draft→published) y ArchivePromotion (published→archived) son las únicas vías de cambio de estado; status inmutable impide que la modificación genérica lo escriba (AQ-GENERIC-UPDATE=1) y el estado de origen de cada transición produce el rechazo explícito ante pedidos repetidos (AQ-REPEATED=1). CheckPromotionValidity guarda status=published (AQ-VALIDITY-GUARD=1), lo que excluye en el borde tanto borradores como archivadas. Lecturas de características y listado siguen disponibles sobre archivadas, con filtro tipado por status además del filtro por enabled (AQ-ARCHIVED-READS=1). Dos conjunciones ratificadas no son expresables en el borde porque una operación admite una sola guarda de igualdad sobre un único campo: (a) en UpdatePromotion, "modificable en borrador y publicada, nunca archivada" (AQ-UPDATE-STATE=1) junto con la guarda vigente enabled=true; se conserva enabled=true en el borde y la exclusión de archivadas queda en CR-013; (b) en CheckPromotionValidity, status=published junto con enabled=true; prevalece la ratificación explícita status=published y la exigencia de habilitación queda en la regla vigente CR-008. Ninguna de las dos ratificaciones se debilita: ambas mitades quedan verificadas en la traza. Requiere aprobar también la propuesta operacional sha256:38e479fd, que aporta PromocionPublicada y PromocionArchivada.'
+negotiation_id: sha256:057d7d18bf332caa3810501b75bbb1515203f9c7fc0d04f8a53ab4742bb69969
+decisions_fingerprint: sha256:095b9bbcfc2d5a36ab4a3faafed3204fe7ce94fe5591e56bd2e082aa08b45cd3
+created_at: 2026-08-11T15:22:19.726Z
+impact:
+  entities_added: []
+  entities_removed: []
+  entities_modified:
+    - Promotion
+  operations_added:
+    - ArchivePromotion
+    - PublishPromotion
+  operations_removed: []
+  operations_modified:
+    - CheckPromotionValidity
+    - ListPromotions
+  policies_added: []
+  policies_removed: []
+  flows_added: []
+  flows_removed: []
+contract:
+  version: "0.2"
+  name: promo-api
+  target:
+    kind: go-rest
+    module: github.com/marianoceneri/promo-api
+    port: 8080
+  entities:
+    - name: Promotion
+      title: promoción
+      plural: promotions
+      id_field: id
+      storage: memory
+      fields:
+        - name: id
+          type: string
+          required: true
+          immutable: true
+        - name: name
+          type: string
+          required: true
+          immutable: false
+        - name: starts_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: ends_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: installments
+          type: integer
+          required: true
+          immutable: false
+          minimum: 1
+          maximum: 48
+        - name: discount_percent
+          type: integer
+          required: true
+          immutable: false
+          minimum: 0
+          maximum: 100
+        - name: enabled
+          type: boolean
+          required: true
+          immutable: true
+        - name: status
+          type: string
+          required: false
+          immutable: true
+          default: draft
+          enum:
+            - draft
+            - published
+            - archived
+  operations:
+    - id: CreatePromotion
+      title: Crear promoción
+      kind: create
+      entity: Promotion
+      method: POST
+      path: /v1/promotions
+      emits: PromocionCreada
+      correlation:
+        promotion_id: id
+      parameters: []
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: UpdatePromotion
+      title: Modificar promoción
+      kind: update
+      entity: Promotion
+      method: PUT
+      path: /v1/promotions/{id}
+      emits: PromocionActualizada
+      correlation:
+        promotion_id: id
+      parameters: []
+      state_guard:
+        field: enabled
+        equals: true
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: PublishPromotion
+      title: Publicar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/publish
+      emits: PromocionPublicada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: status
+        from: draft
+        to: published
+    - id: ArchivePromotion
+      title: Archivar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/archive
+      emits: PromocionArchivada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: status
+        from: published
+        to: archived
+    - id: DisablePromotion
+      title: Dar de baja promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/disable
+      emits: PromocionDadaDeBaja
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: enabled
+        from: true
+        to: false
+    - id: EnablePromotion
+      title: Rehabilitar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/enable
+      emits: PromocionRehabilitada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: enabled
+        from: false
+        to: true
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: GetPromotion
+      title: Consultar promoción
+      kind: get
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}
+      emits: PromocionConsultada
+      correlation:
+        promotion_id: id
+      parameters: []
+    - id: ListPromotions
+      title: Listar promociones
+      kind: list
+      entity: Promotion
+      method: GET
+      path: /v1/promotions
+      emits: CatalogoConsultado
+      correlation: {}
+      parameters:
+        - name: enabled
+          in: query
+          type: boolean
+          required: false
+          field: enabled
+          description: Filtra el listado por estado de habilitación de la promoción.
+        - name: status
+          in: query
+          type: string
+          required: false
+          field: status
+          description: "Filtra el listado por estado del ciclo de vida editorial: draft, published o archived."
+    - id: CheckPromotionValidity
+      title: Consultar vigencia
+      kind: evaluate_validity
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}/validity
+      emits: VigenciaConsultada
+      correlation:
+        promotion_id: id
+      parameters:
+        - name: at
+          in: query
+          type: datetime
+          required: true
+          description: Instante para el cual se evalúa la vigencia, en formato RFC3339.
+      state_guard:
+        field: status
+        equals: published
+  policies:
+    - id: PromotionValidity
+      kind: active_between
+      entity: Promotion
+      start_field: starts_at
+      end_field: ends_at
+      enabled_field: enabled
+      inclusive_start: true
+      exclusive_end: true
+  flows:
+    - name: CatalogManagement
+      title: Gestión de catálogo
+      purpose: Crear, modificar, publicar, archivar, dar de baja y rehabilitar promociones administradas.
+      operations:
+        - CreatePromotion
+        - UpdatePromotion
+        - PublishPromotion
+        - ArchivePromotion
+        - DisablePromotion
+        - EnablePromotion
+    - name: AuthorizationSupport
+      title: Soporte a autorizaciones
+      purpose: Informar vigencia, cuotas y descuento para asistir al equipo autorizador.
+      operations:
+        - GetPromotion
+        - ListPromotions
+        - CheckPromotionValidity
