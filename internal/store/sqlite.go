@@ -26,7 +26,7 @@ func OpenDatabase(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;"); err != nil {
+	if _, err := db.Exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;"); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -39,6 +39,9 @@ func NewTestDatabase() *sql.DB {
 		panic(err)
 	}
 	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		panic(err)
+	}
 	if err := MigrateDatabase(db); err != nil {
 		panic(err)
 	}
@@ -69,35 +72,37 @@ func DatabaseHasRows(db *sql.DB) (bool, error) {
 // the contract abort with an explicit error: destructive migrations require
 // operator action, never an automatic drop.
 func MigrateDatabase(db *sql.DB) error {
-	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS promotions (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, installments INTEGER NOT NULL, discount_percent INTEGER NOT NULL, enabled INTEGER NOT NULL, status TEXT NOT NULL)"); err != nil {
-		return err
-	}
-	existing, err := tableColumns(db, "promotions")
-	if err != nil {
-		return err
-	}
-	expected := []struct{ name, clause string }{
-		{"id", "TEXT NOT NULL DEFAULT ''"},
-		{"name", "TEXT NOT NULL DEFAULT ''"},
-		{"starts_at", "TEXT NOT NULL DEFAULT ''"},
-		{"ends_at", "TEXT NOT NULL DEFAULT ''"},
-		{"installments", "INTEGER NOT NULL DEFAULT 0"},
-		{"discount_percent", "INTEGER NOT NULL DEFAULT 0"},
-		{"enabled", "INTEGER NOT NULL DEFAULT 0"},
-		{"status", "TEXT NOT NULL DEFAULT ''"},
-	}
-	known := map[string]bool{}
-	for _, column := range expected {
-		known[column.name] = true
-		if !existing[column.name] {
-			if _, err := db.Exec("ALTER TABLE promotions ADD COLUMN " + column.name + " " + column.clause); err != nil {
-				return err
+	{
+		if _, err := db.Exec("CREATE TABLE IF NOT EXISTS promotions (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, installments INTEGER NOT NULL, discount_percent INTEGER NOT NULL, enabled INTEGER NOT NULL, status TEXT NOT NULL)"); err != nil {
+			return err
+		}
+		existing, err := tableColumns(db, "promotions")
+		if err != nil {
+			return err
+		}
+		expected := []struct{ name, clause string }{
+			{"id", "TEXT NOT NULL DEFAULT ''"},
+			{"name", "TEXT NOT NULL DEFAULT ''"},
+			{"starts_at", "TEXT NOT NULL DEFAULT ''"},
+			{"ends_at", "TEXT NOT NULL DEFAULT ''"},
+			{"installments", "INTEGER NOT NULL DEFAULT 0"},
+			{"discount_percent", "INTEGER NOT NULL DEFAULT 0"},
+			{"enabled", "INTEGER NOT NULL DEFAULT 0"},
+			{"status", "TEXT NOT NULL DEFAULT ''"},
+		}
+		known := map[string]bool{}
+		for _, column := range expected {
+			known[column.name] = true
+			if !existing[column.name] {
+				if _, err := db.Exec("ALTER TABLE promotions ADD COLUMN " + column.name + " " + column.clause); err != nil {
+					return err
+				}
 			}
 		}
-	}
-	for name := range existing {
-		if !known[name] {
-			return fmt.Errorf("table promotions has column %q outside the active contract; destructive migrations require explicit operator action", name)
+		for name := range existing {
+			if !known[name] {
+				return fmt.Errorf("table promotions has column %q outside the active contract; destructive migrations require explicit operator action", name)
+			}
 		}
 	}
 	return nil
