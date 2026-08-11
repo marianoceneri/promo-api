@@ -119,3 +119,48 @@ func TestPromotionDiscountPercentContractBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestPromotionCreatePromotionPrecondition(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{name: "expired_blocked", body: "{\"id\":\"PROMOTION-PRE-EXPIRED\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}", want: http.StatusConflict},
+		{name: "future_allowed", body: "{\"id\":\"PROMOTION-PRE-FUTURE\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2999-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}", want: http.StatusCreated},
+		{name: "expired_unguarded_allowed", body: "{\"id\":\"PROMOTION-PRE-UNGUARDED\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false}", want: http.StatusCreated},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(store.NewPromotionStore())
+			request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte(test.body)))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status = %d, want %d, body = %s", response.Code, test.want, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestPromotionUpdatePromotionPrecondition(t *testing.T) {
+	handler := NewHandler(store.NewPromotionStore())
+	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2999-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}")))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMOTION-PRE-UPDATE", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true}")))
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expired update status = %d, want 409, body = %s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMOTION-PRE-UPDATE", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false}")))
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unguarded expired update status = %d, want 200, body = %s", response.Code, response.Body.String())
+	}
+}

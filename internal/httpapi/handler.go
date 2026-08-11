@@ -48,6 +48,12 @@ func (h *Handler) createPromotion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if value.Enabled == true {
+		if value.EndsAt.Before(time.Now().UTC()) {
+			writeError(w, http.StatusConflict, "enabled=true requires ends_at at or after the request time")
+			return
+		}
+	}
 	if err := h.promotions.Create(value); err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
 			writeError(w, http.StatusConflict, "id already exists")
@@ -89,6 +95,12 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 	if err := validatePromotion(value); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if value.Enabled == true {
+		if value.EndsAt.Before(time.Now().UTC()) {
+			writeError(w, http.StatusConflict, "enabled=true requires ends_at at or after the request time")
+			return
+		}
 	}
 	if err := h.promotions.Update(value); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not update promotion")

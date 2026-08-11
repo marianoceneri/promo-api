@@ -48,4 +48,28 @@ questions:
       - choice: 3
         answer: El catálogo debe deshabilitarla automáticamente al vencer la vigencia.
         consequence: Introduce un cambio de estado sin operación del consumidor, es decir un efecto temporal autónomo del sistema.
-decisions: []
+decisions:
+  - question_id: AQ-VENCIDA-ALCANCE
+    revision: 1
+    choice: 2
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 2)"
+    rationale: "Lectura literal del pedido: toda escritura del catálogo (alta y modificación) queda sujeta a la precondición temporal. La operación dedicada de habilitación pertenece a la negociación de baja aún no ratificada."
+    decided_at: 2026-08-11T14:30:18.952Z
+  - question_id: AQ-VENCIDA-REFERENCIA
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 2)"
+    rationale: La regla protege el catálogo en el momento de escribir; se acepta que es una garantía de borde HTTP contra el reloj del servicio y no una regla de traza reproducible. La verificación operacional no la re-verifica.
+    decided_at: 2026-08-11T14:30:25.817Z
+  - question_id: AQ-VENCIDA-LIMITE
+    revision: 1
+    choice: 2
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 2)"
+    rationale: Se admite habilitar mientras ends_at no sea estrictamente anterior al instante de referencia. Se acepta conscientemente el criterio de borde distinto al de la evaluación de vigencia; unificar ambos bordes queda registrado como refinamiento futuro.
+    decided_at: 2026-08-11T14:30:36.534Z
+  - question_id: AQ-VENCIDA-EXISTENTE
+    revision: 1
+    choice: 1
+    decided_by: "marianoceneri (delegado autorizado: Claude, ensayo 2)"
+    rationale: La regla prohíbe únicamente el acto de habilitar; no hay efecto retroactivo ni deshabilitación automática. La vigencia efectiva sigue informándose por la evaluación de vigencia existente.
+    decided_at: 2026-08-11T14:30:47.114Z

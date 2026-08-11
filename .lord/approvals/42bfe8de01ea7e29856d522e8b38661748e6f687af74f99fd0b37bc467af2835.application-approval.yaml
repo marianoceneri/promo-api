@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: application_contract_approval
+approval_id: sha256:42bfe8de01ea7e29856d522e8b38661748e6f687af74f99fd0b37bc467af2835
+proposal_id: sha256:592d24a137ed6916f671fff6364d7a0ccf31c7ce29ab211e34acaf8d3403e5c1
+source_contract_id: sha256:bbdd4111b650fd48fbb3d2b7ea24b6299de2cfd0fb3baa7a5c16bdd460bf9d69
+contract_id: sha256:1d64b2472889e32cd56eafaf8b4b15add3eba06f3da241f702103d43033f2b73
+approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 2)"
+approved_at: 2026-08-11T14:34:34.589Z
+rationale: "Revisada contra la negociación sha256:177415b0…cee42: preconditions en Create/Update reflejan las cuatro decisiones ratificadas; impacto acotado a dos operaciones."

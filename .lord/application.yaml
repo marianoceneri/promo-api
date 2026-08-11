@@ -54,6 +54,13 @@ operations:
     correlation:
       promotion_id: id
     parameters: []
+    precondition:
+      when:
+        field: enabled
+        equals: true
+      requires:
+        field: ends_at
+        at_or_after: request_time
   - id: UpdatePromotion
     title: Modificar promoción
     kind: update
@@ -64,6 +71,13 @@ operations:
     correlation:
       promotion_id: id
     parameters: []
+    precondition:
+      when:
+        field: enabled
+        equals: true
+      requires:
+        field: ends_at
+        at_or_after: request_time
   - id: GetPromotion
     title: Consultar promoción
     kind: get
