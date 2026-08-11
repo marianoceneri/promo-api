@@ -1,0 +1,222 @@
+version: "0.1"
+status: proposal
+proposal_id: sha256:a24ec2c36497cf9a87b8847d142a1825341062a62d5b2eed239d9b86def5d003
+source_contract_id: sha256:47f78ab02f20d45bf72c692c57709a1be735fdbb1d26469b11f510994fbd4355
+proposed_contract_id: sha256:a8e9a9a0547e8b36b075c34700358f3729349f76130a4399870f1ae623e62261
+proposed_by: marianoceneri
+rationale: "Negociación sha256:587d8660409cab3a047078705cba1b027b7656ef33b294fb6c12fd34b8dd7549. Incorpora CarritoCotizado al vocabulario operativo para dar soporte a la cotización de carritos (AQ-SCOPE-CARRITO=1) y mantener la alineación con la computación QuoteCart del contrato de aplicación. Según AQ-EVENTO=1 el evento entra sin reglas de orden: cotizar queda auditable y no condicionado a la historia previa, y se evita correlacionarlo con una promoción concreta, que quedaría indeterminada en carritos multi-promoción (AQ-ACUMULACION=1). Según AQ-EFECTO=1 la cotización es simulación sin efecto, por lo que no altera las reglas de canje de cupón (CR-018 a CR-027). Analizado con Z3 en bound 26: conjunto consistente, sin eventos muertos."
+created_at: 2026-08-11T19:19:33.855Z
+impact:
+  events_added:
+    - CarritoCotizado
+  events_removed: []
+  rules_added: []
+  rules_removed: []
+  rules_modified: []
+contract:
+  version: "0.1"
+  name: promotion-management-operational-contract
+  vocabulary:
+    events:
+      - PromocionCreada
+      - PromocionActualizada
+      - PromocionConsultada
+      - CatalogoConsultado
+      - VigenciaConsultada
+      - PromocionDadaDeBaja
+      - PromocionRehabilitada
+      - PromocionPublicada
+      - PromocionArchivada
+      - CuponEmitido
+      - CuponConsultado
+      - CuponCanjeado
+      - CarritoCotizado
+  rules:
+    - id: CR-001
+      description: Una promoción solo puede incorporarse una vez al catálogo por identificador.
+      correlate_by:
+        - promotion_id
+      kind: unique
+      event: PromocionCreada
+    - id: CR-002
+      description: Una promoción solo puede modificarse después de haber sido creada.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionActualizada
+      required: PromocionCreada
+    - id: CR-003
+      description: Las características de una promoción solo pueden consultarse después de incorporarla al catálogo.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionConsultada
+      required: PromocionCreada
+    - id: CR-004
+      description: La vigencia de una promoción solo puede evaluarse después de incorporarla al catálogo.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: VigenciaConsultada
+      required: PromocionCreada
+    - id: CR-005
+      description: Una promoción solo puede darse de baja después de haber sido incorporada al catálogo.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionDadaDeBaja
+      required: PromocionCreada
+    - id: CR-006
+      description: Baja y rehabilitación de una promoción deben alternar, comenzando por la baja.
+      correlate_by:
+        - promotion_id
+      kind: alternates
+      trigger: PromocionDadaDeBaja
+      target: PromocionRehabilitada
+    - id: CR-007
+      description: Una promoción dada de baja no puede modificarse hasta que sea rehabilitada.
+      correlate_by:
+        - promotion_id
+      kind: prohibits_between
+      trigger: PromocionDadaDeBaja
+      target: PromocionRehabilitada
+      prohibited: PromocionActualizada
+    - id: CR-008
+      description: La vigencia de una promoción dada de baja no puede evaluarse hasta que sea rehabilitada.
+      correlate_by:
+        - promotion_id
+      kind: prohibits_between
+      trigger: PromocionDadaDeBaja
+      target: PromocionRehabilitada
+      prohibited: VigenciaConsultada
+    - id: CR-009
+      description: Una promoción solo puede publicarse después de haber sido creada como borrador.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionPublicada
+      required: PromocionCreada
+    - id: CR-010
+      description: "Una promoción solo puede publicarse una vez: no hay retorno a borrador."
+      correlate_by:
+        - promotion_id
+      kind: unique
+      event: PromocionPublicada
+    - id: CR-011
+      description: Una promoción solo puede archivarse después de haber sido publicada.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: PromocionArchivada
+      required: PromocionPublicada
+    - id: CR-012
+      description: "El archivado de una promoción es definitivo: solo puede ocurrir una vez."
+      correlate_by:
+        - promotion_id
+      kind: unique
+      event: PromocionArchivada
+    - id: CR-013
+      description: Una promoción archivada ya no puede modificarse.
+      correlate_by:
+        - promotion_id
+      kind: prohibits_after
+      trigger: PromocionArchivada
+      prohibited: PromocionActualizada
+    - id: CR-014
+      description: La vigencia de una promoción solo puede evaluarse después de publicarla.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: VigenciaConsultada
+      required: PromocionPublicada
+    - id: CR-015
+      description: "Una promoción archivada queda fuera del soporte a autorizaciones: su vigencia ya no puede evaluarse."
+      correlate_by:
+        - promotion_id
+      kind: prohibits_after
+      trigger: PromocionArchivada
+      prohibited: VigenciaConsultada
+    - id: CR-016
+      description: "El archivado prevalece sobre la disponibilidad operativa: una promoción archivada ya no puede darse de baja."
+      correlate_by:
+        - promotion_id
+      kind: prohibits_after
+      trigger: PromocionArchivada
+      prohibited: PromocionDadaDeBaja
+    - id: CR-017
+      description: "El archivado prevalece sobre la disponibilidad operativa: una promoción archivada ya no puede rehabilitarse."
+      correlate_by:
+        - promotion_id
+      kind: prohibits_after
+      trigger: PromocionArchivada
+      prohibited: PromocionRehabilitada
+    - id: CR-018
+      description: Un cupón solo puede emitirse una vez por código.
+      correlate_by:
+        - coupon_code
+      kind: unique
+      event: CuponEmitido
+    - id: CR-019
+      description: Solo puede emitirse un cupón después de que su promoción fue publicada.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: CuponEmitido
+      required: PromocionPublicada
+    - id: CR-020
+      description: Un cupón solo puede consultarse después de haber sido emitido.
+      correlate_by:
+        - coupon_code
+      kind: only_after
+      event: CuponConsultado
+      required: CuponEmitido
+    - id: CR-021
+      description: Un cupón solo puede canjearse una vez.
+      correlate_by:
+        - coupon_code
+      kind: unique
+      event: CuponCanjeado
+    - id: CR-022
+      description: Un cupón solo puede canjearse después de que su promoción fue publicada.
+      correlate_by:
+        - promotion_id
+      kind: only_after
+      event: CuponCanjeado
+      required: PromocionPublicada
+    - id: CR-023
+      description: Un cupón de una promoción archivada ya no puede canjearse.
+      correlate_by:
+        - promotion_id
+      kind: prohibits_after
+      trigger: PromocionArchivada
+      prohibited: CuponCanjeado
+    - id: CR-024
+      description: Un cupón de una promoción dada de baja no puede canjearse hasta que sea rehabilitada.
+      correlate_by:
+        - promotion_id
+      kind: prohibits_between
+      trigger: PromocionDadaDeBaja
+      target: PromocionRehabilitada
+      prohibited: CuponCanjeado
+    - id: CR-025
+      description: Un cupón solo puede canjearse después de haber sido emitido.
+      correlate_by:
+        - coupon_code
+      kind: only_after
+      event: CuponCanjeado
+      required: CuponEmitido
+    - id: CR-026
+      description: Una promoción archivada ya no puede emitir cupones.
+      correlate_by:
+        - promotion_id
+      kind: prohibits_after
+      trigger: PromocionArchivada
+      prohibited: CuponEmitido
+    - id: CR-027
+      description: Una promoción dada de baja no puede emitir cupones hasta que sea rehabilitada.
+      correlate_by:
+        - promotion_id
+      kind: prohibits_between
+      trigger: PromocionDadaDeBaja
+      target: PromocionRehabilitada
+      prohibited: CuponEmitido

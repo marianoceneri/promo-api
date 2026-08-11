@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: operational_contract_approval
+approval_id: sha256:2e84c45a53198a0b9bf41ebacec273676237f40edb110ed1204acb9ca088ef28
+proposal_id: sha256:a24ec2c36497cf9a87b8847d142a1825341062a62d5b2eed239d9b86def5d003
+source_contract_id: sha256:47f78ab02f20d45bf72c692c57709a1be735fdbb1d26469b11f510994fbd4355
+contract_id: sha256:a8e9a9a0547e8b36b075c34700358f3729349f76130a4399870f1ae623e62261
+approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 7)"
+approved_at: 2026-08-11T19:23:25.746Z
+rationale: "Incorpora CarritoCotizado al vocabulario sin reglas de orden, fiel al criterio ratificado: un carrito multi-promoción no tiene identidad única de correlación, así que cualquier regla de precedencia quedaría indeterminada justo en el caso habilitado. Las 27 reglas vigentes quedan intactas."

@@ -9,12 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marianoceneri/promo-api/internal/compute"
 	"github.com/marianoceneri/promo-api/internal/store"
 )
 
 func newTestHandler() http.Handler {
 	db := store.NewTestDatabase()
-	return NewHandler(store.NewPromotionStore(db), store.NewCouponStore(db))
+	return NewHandler(compute.NewBusinessEngine(), store.NewPromotionStore(db), store.NewCouponStore(db))
 }
 
 func TestPromotionContractFlow(t *testing.T) {

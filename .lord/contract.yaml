@@ -14,6 +14,7 @@ vocabulary:
     - CuponEmitido
     - CuponConsultado
     - CuponCanjeado
+    - CarritoCotizado
 rules:
   - id: CR-001
     description: Una promoción solo puede incorporarse una vez al catálogo por identificador.

@@ -1,0 +1,439 @@
+version: "0.2"
+kind: application_contract
+status: proposal
+proposal_id: sha256:1d408b66e1f03c9735d4a88f46fa9012cdc59eed5994cbc29dfa77fc5d080600
+source_contract_id: sha256:d6666803d0fec55c76fb1bae88fb5a0778a35630d307a5e6c1315ef7c0022b96
+proposed_contract_id: sha256:89b509a6739438ffec14c96a728f86a14df933f23ec412967c0ccbd068314f82
+proposed_by: marianoceneri
+rationale: "Cotización de carritos según las siete decisiones ratificadas. AQ-SCOPE-CARRITO=1: se incorpora la computación QuoteCart (POST /v1/quotes) como frontera de cómputo, con el algoritmo fuera del contrato en internal/compute. AQ-SELECCION=2: la entrada QuoteRequest lleva solo los artículos y el instante 'at'; el motor selecciona por su cuenta y solo lee Promotion (reads: [Promotion]). AQ-ACUMULACION=1: la salida Quote incluye el desglose 'applied' y la propiedad PR-BREAKDOWN-ADDS-UP exige que la suma por promoción sea exactamente discount_cents. AQ-TOPE=1: PR-DISCOUNT-NON-NEGATIVE, PR-DISCOUNT-BOUNDED y PR-TOTAL-CONSISTENT fijan descuento >= 0, descuento <= subtotal y total = subtotal - descuento; el total puede llegar a cero. AQ-MONEDA=1: todos los importes son enteros de centavos, única representación sobre la que las propiedades aritméticas se verifican en cada respuesta. AQ-EFECTO=1: simulación sin efecto; no se agregan operaciones ni efectos sobre el catálogo ni sobre los cupones, y el canje sigue siendo RedeemCoupon. AQ-EVENTO=1: emite CarritoCotizado, evento incorporado por la propuesta operativa sha256:a24ec2c36497cf9a87b8847d142a1825341062a62d5b2eed239d9b86def5d003 sin reglas de orden. La computación queda expuesta en el flujo CartQuoting. Sin ejemplos ratificados: no hay ejemplo aprobado por el operador y no corresponde inventarlo."
+negotiation_id: sha256:587d8660409cab3a047078705cba1b027b7656ef33b294fb6c12fd34b8dd7549
+decisions_fingerprint: sha256:2eaa2fce57a1c817c745358bcf2385f8fcc23565a447ecf56f241f55572c8d24
+created_at: 2026-08-11T19:21:57.424Z
+impact:
+  entities_added: []
+  entities_removed: []
+  entities_modified: []
+  operations_added: []
+  operations_removed: []
+  operations_modified: []
+  policies_added: []
+  policies_removed: []
+  flows_added:
+    - CartQuoting
+  flows_removed: []
+contract:
+  version: "0.2"
+  name: promo-api
+  target:
+    kind: go-rest
+    module: github.com/marianoceneri/promo-api
+    port: 8080
+    database:
+      kind: sqlite
+      path: ./data/promotions.db
+  entities:
+    - name: Promotion
+      title: promoción
+      plural: promotions
+      id_field: id
+      storage: sqlite
+      fields:
+        - name: id
+          type: string
+          required: true
+          immutable: true
+        - name: name
+          type: string
+          required: true
+          immutable: false
+        - name: starts_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: ends_at
+          type: datetime
+          required: true
+          immutable: false
+        - name: installments
+          type: integer
+          required: true
+          immutable: false
+          minimum: 1
+          maximum: 48
+        - name: discount_percent
+          type: integer
+          required: true
+          immutable: false
+          minimum: 0
+          maximum: 100
+        - name: enabled
+          type: boolean
+          required: true
+          immutable: true
+        - name: status
+          type: string
+          required: false
+          immutable: true
+          default: draft
+          enum:
+            - draft
+            - published
+            - archived
+    - name: Coupon
+      title: cupón
+      plural: coupons
+      id_field: code
+      storage: sqlite
+      fields:
+        - name: code
+          type: string
+          required: true
+          immutable: true
+        - name: promotion_id
+          type: string
+          required: true
+          immutable: true
+          references:
+            entity: Promotion
+            field: id
+        - name: status
+          type: string
+          required: false
+          immutable: true
+          default: issued
+          enum:
+            - issued
+            - redeemed
+  operations:
+    - id: CreatePromotion
+      title: Crear promoción
+      kind: create
+      entity: Promotion
+      method: POST
+      path: /v1/promotions
+      emits: PromocionCreada
+      correlation:
+        promotion_id: id
+      parameters: []
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: UpdatePromotion
+      title: Modificar promoción
+      kind: update
+      entity: Promotion
+      method: PUT
+      path: /v1/promotions/{id}
+      emits: PromocionActualizada
+      correlation:
+        promotion_id: id
+      parameters: []
+      state_guards:
+        - field: enabled
+          equals: true
+        - field: status
+          in:
+            - draft
+            - published
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: PublishPromotion
+      title: Publicar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/publish
+      emits: PromocionPublicada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: status
+        from: draft
+        to: published
+    - id: ArchivePromotion
+      title: Archivar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/archive
+      emits: PromocionArchivada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: status
+        from: published
+        to: archived
+    - id: DisablePromotion
+      title: Dar de baja promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/disable
+      emits: PromocionDadaDeBaja
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: enabled
+        from: true
+        to: false
+      state_guards:
+        - field: status
+          in:
+            - draft
+            - published
+    - id: EnablePromotion
+      title: Rehabilitar promoción
+      kind: transition
+      entity: Promotion
+      method: POST
+      path: /v1/promotions/{id}/enable
+      emits: PromocionRehabilitada
+      correlation:
+        promotion_id: id
+      parameters: []
+      transition:
+        field: enabled
+        from: false
+        to: true
+      state_guards:
+        - field: status
+          in:
+            - draft
+            - published
+      precondition:
+        when:
+          field: enabled
+          equals: true
+        requires:
+          field: ends_at
+          at_or_after: request_time
+    - id: GetPromotion
+      title: Consultar promoción
+      kind: get
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}
+      emits: PromocionConsultada
+      correlation:
+        promotion_id: id
+      parameters: []
+    - id: ListPromotions
+      title: Listar promociones
+      kind: list
+      entity: Promotion
+      method: GET
+      path: /v1/promotions
+      emits: CatalogoConsultado
+      correlation: {}
+      parameters:
+        - name: enabled
+          in: query
+          type: boolean
+          required: false
+          field: enabled
+          description: Filtra el listado por estado de habilitación de la promoción.
+        - name: status
+          in: query
+          type: string
+          required: false
+          field: status
+          description: "Filtra el listado por estado del ciclo de vida editorial: draft, published o archived."
+    - id: CheckPromotionValidity
+      title: Consultar vigencia
+      kind: evaluate_validity
+      entity: Promotion
+      method: GET
+      path: /v1/promotions/{id}/validity
+      emits: VigenciaConsultada
+      correlation:
+        promotion_id: id
+      parameters:
+        - name: at
+          in: query
+          type: datetime
+          required: true
+          description: Instante para el cual se evalúa la vigencia, en formato RFC3339.
+      state_guards:
+        - field: status
+          equals: published
+        - field: enabled
+          equals: true
+    - id: IssueCoupon
+      title: Emitir cupón
+      kind: create
+      entity: Coupon
+      method: POST
+      path: /v1/coupons
+      emits: CuponEmitido
+      correlation:
+        coupon_code: code
+        promotion_id: promotion_id
+      parameters: []
+      state_guards:
+        - via: promotion_id
+          field: status
+          equals: published
+        - via: promotion_id
+          field: enabled
+          equals: true
+    - id: GetCoupon
+      title: Consultar cupón
+      kind: get
+      entity: Coupon
+      method: GET
+      path: /v1/coupons/{code}
+      emits: CuponConsultado
+      correlation:
+        coupon_code: code
+        promotion_id: promotion_id
+      parameters: []
+    - id: RedeemCoupon
+      title: Canjear cupón
+      kind: transition
+      entity: Coupon
+      method: POST
+      path: /v1/coupons/{code}/redeem
+      emits: CuponCanjeado
+      correlation:
+        coupon_code: code
+        promotion_id: promotion_id
+      parameters: []
+      transition:
+        field: status
+        from: issued
+        to: redeemed
+      state_guards:
+        - via: promotion_id
+          field: status
+          equals: published
+        - via: promotion_id
+          field: enabled
+          equals: true
+      precondition:
+        requires:
+          policy: PromotionValidity
+          via: promotion_id
+  shapes:
+    - name: CartItem
+      fields:
+        - name: sku
+          type: string
+          required: true
+        - name: quantity
+          type: integer
+          required: true
+        - name: unit_price_cents
+          type: integer
+          required: true
+    - name: QuoteRequest
+      fields:
+        - name: at
+          type: datetime
+          required: true
+        - name: items
+          list_of:
+            shape: CartItem
+          required: true
+    - name: AppliedPromotion
+      fields:
+        - name: promotion_id
+          type: string
+          required: true
+        - name: discount_cents
+          type: integer
+          required: true
+    - name: Quote
+      fields:
+        - name: subtotal_cents
+          type: integer
+          required: true
+        - name: discount_cents
+          type: integer
+          required: true
+        - name: total_cents
+          type: integer
+          required: true
+        - name: applied
+          list_of:
+            shape: AppliedPromotion
+          required: true
+  computations:
+    - id: QuoteCart
+      purpose: el importe final de un carrito tras acumular las promociones publicadas, habilitadas y vigentes al instante de la cotización
+      method: POST
+      path: /v1/quotes
+      emits: CarritoCotizado
+      input: QuoteRequest
+      output: Quote
+      reads:
+        - Promotion
+      properties:
+        - id: PR-DISCOUNT-NON-NEGATIVE
+          kind: non_negative
+          field: discount_cents
+        - id: PR-DISCOUNT-BOUNDED
+          kind: not_greater_than
+          field: discount_cents
+          than: subtotal_cents
+        - id: PR-TOTAL-CONSISTENT
+          kind: equals_difference
+          field: total_cents
+          minuend: subtotal_cents
+          subtrahend: discount_cents
+        - id: PR-BREAKDOWN-ADDS-UP
+          kind: equals_sum_of
+          field: discount_cents
+          collection: applied
+          item_field: discount_cents
+      examples: []
+  policies:
+    - id: PromotionValidity
+      kind: active_between
+      entity: Promotion
+      start_field: starts_at
+      end_field: ends_at
+      enabled_field: enabled
+      inclusive_start: true
+      exclusive_end: true
+  flows:
+    - name: CatalogManagement
+      title: Gestión de catálogo
+      purpose: Crear, modificar, publicar, archivar, dar de baja y rehabilitar promociones administradas.
+      operations:
+        - CreatePromotion
+        - UpdatePromotion
+        - PublishPromotion
+        - ArchivePromotion
+        - DisablePromotion
+        - EnablePromotion
+    - name: CouponManagement
+      title: Gestión de cupones
+      purpose: Emitir cupones de una promoción publicada y habilitada, y registrar su canje único mientras la promoción sigue publicada, habilitada y vigente.
+      operations:
+        - IssueCoupon
+        - RedeemCoupon
+    - name: AuthorizationSupport
+      title: Soporte a autorizaciones
+      purpose: Informar vigencia, cuotas y descuento para asistir al equipo autorizador.
+      operations:
+        - GetPromotion
+        - ListPromotions
+        - CheckPromotionValidity
+        - GetCoupon
+    - name: CartQuoting
+      title: Cotización de carritos
+      purpose: Calcular el importe final de un carrito aplicando las promociones publicadas, habilitadas y vigentes al instante indicado, sin alterar el estado del catálogo ni de los cupones.
+      operations:
+        - QuoteCart

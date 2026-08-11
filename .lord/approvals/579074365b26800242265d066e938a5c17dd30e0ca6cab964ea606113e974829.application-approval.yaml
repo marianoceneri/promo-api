@@ -1,0 +1,10 @@
+version: "0.3"
+status: approved
+kind: application_contract_approval
+approval_id: sha256:579074365b26800242265d066e938a5c17dd30e0ca6cab964ea606113e974829
+proposal_id: sha256:2693869131bf21740404cedd9f07bb70bc1ad556e80ac11da72475c8eda45548
+source_contract_id: sha256:d6666803d0fec55c76fb1bae88fb5a0778a35630d307a5e6c1315ef7c0022b96
+contract_id: sha256:31cd1a6338b8b2d1f81c07e1f3d49e61d73018e88aba0cb493c003ed6a9bb978
+approved_by: "marianoceneri (delegado autorizado: Claude, ensayo 7)"
+approved_at: 2026-08-11T19:40:10.574Z
+rationale: "Cotización de carritos como computación gobernada: formas del carrito y del resultado, cuatro invariantes verificados en cada respuesta (descuento no negativo, topado por el subtotal, total consistente y desglose que suma) y los tres ejemplos ratificados por el operador con su catálogo declarado. El algoritmo de selección y acumulación queda fuera de la generación, como corresponde: LORD verifica que la cuenta cierre, no qué combinación es la mejor."

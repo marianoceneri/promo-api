@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marianoceneri/promo-api/internal/compute"
 	"github.com/marianoceneri/promo-api/internal/domain"
 	"github.com/marianoceneri/promo-api/internal/observability"
 	"github.com/marianoceneri/promo-api/internal/store"
@@ -19,11 +20,12 @@ import (
 type Handler struct {
 	promotions *store.PromotionStore
 	coupons    *store.CouponStore
+	engine     compute.Engine
 	events     *observability.Recorder
 }
 
-func newHandler(promotions *store.PromotionStore, coupons *store.CouponStore) (*Handler, http.Handler) {
-	handler := &Handler{promotions: promotions, coupons: coupons, events: observability.NewRecorder()}
+func newHandler(engine compute.Engine, promotions *store.PromotionStore, coupons *store.CouponStore) (*Handler, http.Handler) {
+	handler := &Handler{promotions: promotions, coupons: coupons, engine: engine, events: observability.NewRecorder()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -43,19 +45,20 @@ func newHandler(promotions *store.PromotionStore, coupons *store.CouponStore) (*
 	mux.HandleFunc("POST /v1/coupons", handler.issueCoupon)
 	mux.HandleFunc("GET /v1/coupons/{code}", handler.getCoupon)
 	mux.HandleFunc("POST /v1/coupons/{code}/redeem", handler.redeemCoupon)
+	mux.HandleFunc("POST /v1/quotes", handler.quoteCart)
 	return handler, mux
 }
 
-func NewHandler(promotions *store.PromotionStore, coupons *store.CouponStore) http.Handler {
-	_, mux := newHandler(promotions, coupons)
+func NewHandler(engine compute.Engine, promotions *store.PromotionStore, coupons *store.CouponStore) http.Handler {
+	_, mux := newHandler(engine, promotions, coupons)
 	return mux
 }
 
 // NewHandlerWithHistory reports whether the event history is complete: a
 // service starting over pre-existing persistent state must declare an
 // incomplete history so runtime verification stays honest.
-func NewHandlerWithHistory(historyComplete bool, promotions *store.PromotionStore, coupons *store.CouponStore) http.Handler {
-	handler, mux := newHandler(promotions, coupons)
+func NewHandlerWithHistory(historyComplete bool, engine compute.Engine, promotions *store.PromotionStore, coupons *store.CouponStore) http.Handler {
+	handler, mux := newHandler(engine, promotions, coupons)
 	if !historyComplete {
 		handler.events.MarkHistoryIncomplete()
 	}
@@ -446,6 +449,28 @@ func (h *Handler) redeemCoupon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-LORD-Event", "CuponCanjeado")
 	h.events.Record("CuponCanjeado", map[string]any{"coupon_code": value.Code, "promotion_id": value.PromotionId})
 	writeJSON(w, http.StatusOK, value)
+}
+
+func (h *Handler) quoteCart(w http.ResponseWriter, r *http.Request) {
+	var request domain.QuoteRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	result, err := h.engine.QuoteCart(request, h.promotions.List())
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if err := compute.VerifyQuoteCart(result); err != nil {
+		// The implementation broke a contractual invariant: fail closed rather
+		// than return a result the contract does not admit.
+		writeError(w, http.StatusInternalServerError, "contract invariant violated: "+err.Error())
+		return
+	}
+	w.Header().Set("X-LORD-Event", "CarritoCotizado")
+	h.events.Record("CarritoCotizado", nil)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func applyPromotionDefaults(value *domain.Promotion) {

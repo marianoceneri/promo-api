@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/marianoceneri/promo-api/internal/compute"
 	"github.com/marianoceneri/promo-api/internal/httpapi"
 	"github.com/marianoceneri/promo-api/internal/store"
 )
@@ -28,7 +29,7 @@ func main() {
 	}
 	promotionStore := store.NewPromotionStore(db)
 	couponStore := store.NewCouponStore(db)
-	handler := httpapi.NewHandlerWithHistory(!hadRows, promotionStore, couponStore)
+	handler := httpapi.NewHandlerWithHistory(!hadRows, compute.NewBusinessEngine(), promotionStore, couponStore)
 	log.Printf("promo-api listening on 127.0.0.1:8080")
 	log.Fatal(http.ListenAndServe("127.0.0.1:8080", handler))
 }

@@ -1,0 +1,117 @@
+version: "0.3"
+kind: application_negotiation
+negotiation_id: sha256:587d8660409cab3a047078705cba1b027b7656ef33b294fb6c12fd34b8dd7549
+source_contract_id: sha256:d6666803d0fec55c76fb1bae88fb5a0778a35630d307a5e6c1315ef7c0022b96
+request: "Cotizar un carrito: el consumidor envía artículos con precio unitario y cantidad, y la API devuelve el importe final con las promociones aplicadas. Requisito explícito del operador: el descuento nunca puede superar el total del carrito."
+requested_by: marianoceneri
+created_at: 2026-08-11T19:04:06.846Z
+questions:
+  - question_id: AQ-SCOPE-CARRITO
+    question: El scope confirmado del contexto 'promotions' excluye hoy explícitamente 'cotización y aplicación de descuentos sobre carritos' y 'selección o acumulación de promociones'. ¿Se amplía el scope para admitir la cotización de carritos?
+    alternatives:
+      - choice: 1
+        answer: "Sí: se amplía el scope e incorpora la cotización de carritos como frontera de cómputo, con el algoritmo implementado fuera del contrato."
+        consequence: Se agrega una computación QuoteCart al contrato de aplicación y un evento de cotización al contrato operativo. LORD genera tipos, handler, invariantes y tests; el algoritmo de selección/acumulación queda como código no gobernado en internal/compute.
+      - choice: 2
+        answer: "No: el scope se mantiene y la cotización queda fuera de este contexto."
+        consequence: No se cambia el contrato. La cotización debe resolverse en otro sistema, consumiendo GET /v1/promotions y /validity como soporte informativo.
+  - question_id: AQ-SELECCION
+    question: ¿Cómo se determinan las promociones aplicables a un carrito?
+    alternatives:
+      - choice: 1
+        answer: El consumidor envía explícitamente los identificadores de promoción (y/o códigos de cupón) a aplicar.
+        consequence: La entrada incluye una lista de promociones candidatas; el motor solo valida y calcula. La responsabilidad de elegir queda del lado del consumidor.
+      - choice: 2
+        answer: El motor selecciona por su cuenta entre todas las promociones publicadas, habilitadas y vigentes al instante de la cotización.
+        consequence: "La entrada solo lleva artículos y un instante. La selección es algoritmo no gobernado: LORD no puede verificar que la elección sea 'la mejor' ni que sea determinista."
+      - choice: 3
+        answer: Una sola promoción por carrito, indicada explícitamente por el consumidor.
+        consequence: Entrada con un único promotion_id. Elimina la acumulación y simplifica las invariantes, pero impide combinar promociones.
+  - question_id: AQ-ACUMULACION
+    question: ¿Pueden acumularse varias promociones sobre el mismo carrito?
+    alternatives:
+      - choice: 1
+        answer: Sí, se acumulan y el desglose por promoción debe sumar exactamente el descuento total.
+        consequence: La salida lleva una lista 'applied' y se agrega la invariante equals_sum_of sobre ella. LORD verifica que el desglose cierre, no qué combinación es correcta.
+      - choice: 2
+        answer: "No: se aplica a lo sumo una promoción por carrito."
+        consequence: La salida lleva a lo sumo una promoción aplicada. Sin invariante de suma de desglose.
+  - question_id: AQ-TOPE
+    question: ¿Contra qué se topea el descuento para que 'nunca regale plata'?
+    alternatives:
+      - choice: 1
+        answer: El descuento nunca puede superar el subtotal del carrito; el total puede llegar a cero.
+        consequence: "Invariantes: descuento >= 0, descuento <= subtotal, total = subtotal - descuento. Una respuesta que las viole falla con 500 nombrando la propiedad, en vez de devolver un importe inadmisible."
+      - choice: 2
+        answer: "Además del tope por subtotal, el total nunca puede ser cero: siempre queda un importe mínimo a pagar."
+        consequence: Un mínimo estricto mayor que cero no es expresable con las propiedades aritméticas disponibles (non_negative, not_greater_than, equals_difference, equals_sum_of); habría que dejarlo como ejemplo ratificado, sin verificación en cada respuesta.
+  - question_id: AQ-MONEDA
+    question: ¿Cómo se representan los importes en la API?
+    alternatives:
+      - choice: 1
+        answer: Enteros en centavos (unit_price_cents, subtotal_cents, discount_cents, total_cents).
+        consequence: Es la única representación sobre la que LORD puede verificar las invariantes aritméticas en cada respuesta. Evita errores de redondeo binario.
+      - choice: 2
+        answer: Decimales en unidades monetarias.
+        consequence: "Las propiedades aritméticas de LORD operan sobre campos enteros: las invariantes de tope y consistencia dejarían de verificarse en cada respuesta."
+  - question_id: AQ-EFECTO
+    question: ¿La cotización tiene efecto sobre el estado (canjea cupones, reserva descuentos) o es una simulación sin efecto?
+    alternatives:
+      - choice: 1
+        answer: "Simulación sin efecto: cotizar no canjea ni reserva nada; el canje sigue siendo la operación dedicada del cupón."
+        consequence: La computación solo lee promociones. El canje único sigue gobernado por las reglas operativas existentes del cupón.
+      - choice: 2
+        answer: Cotizar un carrito con cupón canjea ese cupón.
+        consequence: Mezcla cómputo y transición de estado en una sola operación; el canje dejaría de ser una acción explícita y una cotización repetida fallaría por la unicidad del canje.
+  - question_id: AQ-EVENTO
+    question: ¿La cotización debe registrarse como evento en el contrato operativo?
+    alternatives:
+      - choice: 1
+        answer: "Sí: emite CarritoCotizado, sin reglas de orden que lo restrinjan."
+        consequence: El evento entra al vocabulario operativo y la alineación entre contratos se mantiene. Cotizar queda auditable y no queda condicionado a la historia previa del carrito.
+      - choice: 2
+        answer: Sí, y además solo puede cotizarse contra promociones ya publicadas.
+        consequence: Requiere correlacionar la cotización con una promoción concreta; un carrito con varias promociones no tiene una identidad única de correlación, por lo que la regla quedaría indeterminada para carritos multi-promoción.
+decisions:
+  - question_id: AQ-SCOPE-CARRITO
+    revision: 1
+    choice: 1
+    decided_by: marianoceneri
+    rationale: El operador amplía el scope del contexto promotions para incorporar la cotización de carritos como frontera de cómputo, con el algoritmo de selección y acumulación implementado fuera del contrato.
+    decided_at: 2026-08-11T19:05:34.492Z
+  - question_id: AQ-SELECCION
+    revision: 1
+    choice: 2
+    decided_by: marianoceneri
+    rationale: El operador decide que el motor seleccione por su cuenta entre las promociones publicadas, habilitadas y vigentes al instante de la cotización; la entrada solo lleva artículos y el instante de evaluación.
+    decided_at: 2026-08-11T19:06:31.384Z
+  - question_id: AQ-ACUMULACION
+    revision: 1
+    choice: 1
+    decided_by: marianoceneri
+    rationale: El operador admite acumular varias promociones sobre el mismo carrito, con desglose por promoción que debe sumar exactamente el descuento total.
+    decided_at: 2026-08-11T19:07:26.305Z
+  - question_id: AQ-TOPE
+    revision: 1
+    choice: 1
+    decided_by: marianoceneri
+    rationale: "El operador ratifica el tope contra el subtotal del carrito: descuento no negativo, nunca mayor al subtotal, y total igual a la diferencia. El total puede llegar a cero."
+    decided_at: 2026-08-11T19:08:21.610Z
+  - question_id: AQ-MONEDA
+    revision: 1
+    choice: 1
+    decided_by: marianoceneri
+    rationale: El operador ratifica que los importes se representan como enteros de centavos (unit_price_cents, subtotal_cents, discount_cents, total_cents), única representación sobre la que LORD puede verificar en cada respuesta las invariantes aritméticas ratificadas en AQ-TOPE y el desglose de AQ-ACUMULACION.
+    decided_at: 2026-08-11T19:17:07.027Z
+  - question_id: AQ-EFECTO
+    revision: 1
+    choice: 1
+    decided_by: marianoceneri
+    rationale: "El operador ratifica que la cotización es una simulación sin efecto: no agrega efectos sobre el catálogo ni sobre los cupones. La computación solo lee promociones y el canje único sigue gobernado por la operación dedicada RedeemCoupon y sus reglas operativas existentes."
+    decided_at: 2026-08-11T19:17:17.997Z
+  - question_id: AQ-EVENTO
+    revision: 1
+    choice: 1
+    decided_by: marianoceneri
+    rationale: El operador ratifica que la cotización emite su propio evento CarritoCotizado en el vocabulario operativo, sin reglas de orden que lo restrinjan. Cotizar queda auditable y no condicionado a la historia previa; se evita la correlación con una promoción concreta, que quedaría indeterminada en carritos multi-promoción.
+    decided_at: 2026-08-11T19:17:28.398Z

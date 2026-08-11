@@ -301,6 +301,145 @@ operations:
       requires:
         policy: PromotionValidity
         via: promotion_id
+shapes:
+  - name: CartItem
+    fields:
+      - name: sku
+        type: string
+        required: true
+      - name: quantity
+        type: integer
+        required: true
+      - name: unit_price_cents
+        type: integer
+        required: true
+  - name: QuoteRequest
+    fields:
+      - name: at
+        type: datetime
+        required: true
+      - name: items
+        list_of:
+          shape: CartItem
+        required: true
+  - name: AppliedPromotion
+    fields:
+      - name: promotion_id
+        type: string
+        required: true
+      - name: discount_cents
+        type: integer
+        required: true
+  - name: Quote
+    fields:
+      - name: subtotal_cents
+        type: integer
+        required: true
+      - name: discount_cents
+        type: integer
+        required: true
+      - name: total_cents
+        type: integer
+        required: true
+      - name: applied
+        list_of:
+          shape: AppliedPromotion
+        required: true
+computations:
+  - id: QuoteCart
+    purpose: el importe final de un carrito tras acumular las promociones publicadas, habilitadas y vigentes al instante de la cotización
+    method: POST
+    path: /v1/quotes
+    emits: CarritoCotizado
+    input: QuoteRequest
+    output: Quote
+    reads:
+      - Promotion
+    properties:
+      - id: PR-DISCOUNT-NON-NEGATIVE
+        kind: non_negative
+        field: discount_cents
+      - id: PR-DISCOUNT-BOUNDED
+        kind: not_greater_than
+        field: discount_cents
+        than: subtotal_cents
+      - id: PR-TOTAL-CONSISTENT
+        kind: equals_difference
+        field: total_cents
+        minuend: subtotal_cents
+        subtrahend: discount_cents
+      - id: PR-BREAKDOWN-ADDS-UP
+        kind: equals_sum_of
+        field: discount_cents
+        collection: applied
+        item_field: discount_cents
+    examples:
+      - id: EX-SIN-PROMOS
+        title: un carrito de 2000 sin promociones aplicables paga 2000
+        world:
+          Promotion: []
+        given:
+          at: 2026-06-01T12:00:00Z
+          items:
+            - sku: A
+              quantity: 1
+              unit_price_cents: 2000
+        expect:
+          subtotal_cents: 2000
+          discount_cents: 0
+          total_cents: 2000
+      - id: EX-MITAD
+        title: una promoción del 50% sobre un carrito de 2000 deja 1000
+        world:
+          Promotion:
+            - id: P-50
+              name: mitad
+              starts_at: 2026-01-01T00:00:00Z
+              ends_at: 2027-01-01T00:00:00Z
+              installments: 1
+              discount_percent: 50
+              enabled: true
+              status: published
+        given:
+          at: 2026-06-01T12:00:00Z
+          items:
+            - sku: A
+              quantity: 2
+              unit_price_cents: 1000
+        expect:
+          subtotal_cents: 2000
+          discount_cents: 1000
+          total_cents: 1000
+      - id: EX-TOPE-CERO
+        title: varias promociones que acumulan más que el carrito lo dejan en cero
+        world:
+          Promotion:
+            - id: P-60
+              name: sesenta
+              starts_at: 2026-01-01T00:00:00Z
+              ends_at: 2027-01-01T00:00:00Z
+              installments: 1
+              discount_percent: 60
+              enabled: true
+              status: published
+            - id: P-70
+              name: setenta
+              starts_at: 2026-01-01T00:00:00Z
+              ends_at: 2027-01-01T00:00:00Z
+              installments: 1
+              discount_percent: 70
+              enabled: true
+              status: published
+        given:
+          at: 2026-06-01T12:00:00Z
+          items:
+            - sku: A
+              quantity: 1
+              unit_price_cents: 2000
+        expect:
+          subtotal_cents: 2000
+          discount_cents: 2000
+          total_cents: 0
 policies:
   - id: PromotionValidity
     kind: active_between
@@ -335,3 +474,8 @@ flows:
       - ListPromotions
       - CheckPromotionValidity
       - GetCoupon
+  - name: CartQuoting
+    title: Cotización de carritos
+    purpose: Calcular el importe final de un carrito aplicando las promociones publicadas, habilitadas y vigentes al instante indicado, sin alterar el estado del catálogo ni de los cupones.
+    operations:
+      - QuoteCart

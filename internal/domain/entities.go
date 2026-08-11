@@ -19,3 +19,26 @@ type Coupon struct {
 	PromotionId string `json:"promotion_id"`
 	Status      string `json:"status"`
 }
+
+type CartItem struct {
+	Sku            string `json:"sku"`
+	Quantity       int64  `json:"quantity"`
+	UnitPriceCents int64  `json:"unit_price_cents"`
+}
+
+type QuoteRequest struct {
+	At    time.Time  `json:"at"`
+	Items []CartItem `json:"items"`
+}
+
+type AppliedPromotion struct {
+	PromotionId   string `json:"promotion_id"`
+	DiscountCents int64  `json:"discount_cents"`
+}
+
+type Quote struct {
+	SubtotalCents int64              `json:"subtotal_cents"`
+	DiscountCents int64              `json:"discount_cents"`
+	TotalCents    int64              `json:"total_cents"`
+	Applied       []AppliedPromotion `json:"applied"`
+}
