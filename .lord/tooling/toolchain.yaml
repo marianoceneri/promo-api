@@ -1,5 +1,5 @@
-version: "0.8.1"
+version: "0.9.3"
 source_repository: marianoceneri/lord
-source_revision: b2cfd541ab1f8edd3d62339c77f451a7ede4bf89
+source_revision: b7d3aa6f57b542bec801303135fb5750c90ee372
 artifact: lord-check.cjs
-sha256: 97fceddd0f687ad75202e21f11712a85e0b353d629f2bb481d08d4b8e11d2189
+sha256: f73e4974f76a08e29f50f666d3970366f8fae86f766cccd7a0489e6806e4dd52

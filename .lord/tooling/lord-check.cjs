@@ -22057,7 +22057,10 @@ config(en_default());
 // src/application/alignment.ts
 function alignApplicationWithOperationalContract(application, operational) {
   const vocabulary = new Set(operational.vocabulary.events);
-  const emitted = new Set(application.operations.flatMap((operation) => operation.emits ? [operation.emits] : []));
+  const emitted = /* @__PURE__ */ new Set([
+    ...application.operations.flatMap((operation) => operation.emits ? [operation.emits] : []),
+    ...(application.computations ?? []).flatMap((computation) => computation.emits ? [computation.emits] : [])
+  ]);
   const operationsWithoutEvents = application.operations.filter((operation) => !operation.emits).map((operation) => operation.id).sort();
   const outside = [...emitted].filter((event) => !vocabulary.has(event)).sort();
   const requiredCorrelations = operational.rules.reduce((result, rule) => {
@@ -22570,6 +22573,99 @@ async function loadRefinementArtifact(path) {
 // src/application/parser.ts
 var import_yaml5 = __toESM(require_dist(), 1);
 
+// src/application/computation.ts
+var scalarTypeSchema = external_exports.enum(["string", "integer", "boolean", "datetime"]);
+var shapeFieldSchema = external_exports.lazy(() => external_exports.union([
+  external_exports.object({
+    name: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    type: scalarTypeSchema,
+    required: external_exports.boolean().default(false)
+  }).strict(),
+  external_exports.object({
+    name: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    shape: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
+    required: external_exports.boolean().default(false)
+  }).strict(),
+  external_exports.object({
+    name: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    list_of: external_exports.union([scalarTypeSchema, external_exports.object({ shape: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/) }).strict()]),
+    required: external_exports.boolean().default(false)
+  }).strict()
+]));
+var applicationShapeSchema = external_exports.object({
+  name: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
+  title: external_exports.string().min(1).optional(),
+  fields: external_exports.array(shapeFieldSchema).min(1)
+}).strict();
+var computationPropertySchema = external_exports.union([
+  external_exports.object({
+    id: external_exports.string().regex(/^PR-[A-Z0-9-]+$/),
+    description: external_exports.string().min(1).optional(),
+    kind: external_exports.literal("non_negative"),
+    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/)
+  }).strict(),
+  external_exports.object({
+    id: external_exports.string().regex(/^PR-[A-Z0-9-]+$/),
+    description: external_exports.string().min(1).optional(),
+    kind: external_exports.literal("not_greater_than"),
+    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    than: external_exports.string().regex(/^[a-z][a-z0-9_]*$/)
+  }).strict(),
+  external_exports.object({
+    id: external_exports.string().regex(/^PR-[A-Z0-9-]+$/),
+    description: external_exports.string().min(1).optional(),
+    kind: external_exports.literal("equals_difference"),
+    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    minuend: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    subtrahend: external_exports.string().regex(/^[a-z][a-z0-9_]*$/)
+  }).strict(),
+  external_exports.object({
+    id: external_exports.string().regex(/^PR-[A-Z0-9-]+$/),
+    description: external_exports.string().min(1).optional(),
+    kind: external_exports.literal("equals_sum_of"),
+    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    collection: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    item_field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/)
+  }).strict()
+]);
+var computationExampleSchema = external_exports.object({
+  id: external_exports.string().regex(/^EX-[A-Z0-9-]+$/),
+  title: external_exports.string().min(1),
+  /**
+   * The world the computation reads: entity name → records that must exist
+   * before the example runs. Without it, any example whose result depends on
+   * stored state (a catalog, a price list) is inexpressible.
+   */
+  world: external_exports.record(external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/), external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown()))).optional(),
+  given: external_exports.record(external_exports.string(), external_exports.unknown()),
+  expect: external_exports.record(external_exports.string(), external_exports.unknown())
+}).strict();
+var applicationComputationSchema = external_exports.object({
+  id: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
+  title: external_exports.string().min(1).optional(),
+  purpose: external_exports.string().min(1),
+  method: external_exports.literal("POST"),
+  path: external_exports.string().startsWith("/"),
+  emits: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/).optional(),
+  input: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
+  output: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
+  reads: external_exports.array(external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/)).default([]),
+  properties: external_exports.array(computationPropertySchema).min(1),
+  examples: external_exports.array(computationExampleSchema).default([])
+}).strict();
+function describeProperty(property) {
+  switch (property.kind) {
+    case "non_negative":
+      return `${property.field} is never negative`;
+    case "not_greater_than":
+      return `${property.field} never exceeds ${property.than}`;
+    case "equals_difference":
+      return `${property.field} equals ${property.minuend} minus ${property.subtrahend}`;
+    case "equals_sum_of":
+      return `${property.field} equals the sum of ${property.collection}[].${property.item_field}`;
+  }
+}
+
 // src/application/model.ts
 var fieldTypeSchema = external_exports.enum(["string", "integer", "boolean", "datetime"]);
 var applicationFieldSchema = external_exports.object({
@@ -22682,6 +22778,11 @@ var applicationContractSchema = external_exports.object({
   }).strict(),
   entities: external_exports.array(applicationEntitySchema).min(1),
   operations: external_exports.array(applicationOperationSchema).min(1),
+  // Optional rather than defaulted: an absent section must stay absent after
+  // parsing, or adding a capability to the engine would change the
+  // fingerprint of every existing contract and invalidate its approval.
+  shapes: external_exports.array(applicationShapeSchema).optional(),
+  computations: external_exports.array(applicationComputationSchema).optional(),
   policies: external_exports.array(validityPolicySchema).default([]),
   flows: external_exports.array(applicationFlowSchema).min(1)
 }).strict().superRefine((contract, context) => {
@@ -22849,8 +22950,71 @@ var applicationContractSchema = external_exports.object({
       context.addIssue({ code: "custom", path: ["policies", index, "enabled_field"], message: "enabled_field must reference a boolean field" });
     }
   });
+  unique((contract.shapes ?? []).map((item) => item.name), context, ["shapes"], "shape");
+  unique((contract.computations ?? []).map((item) => item.id), context, ["computations"], "computation");
+  const shapes = new Map((contract.shapes ?? []).map((shape) => [shape.name, shape]));
+  (contract.shapes ?? []).forEach((shape, shapeIndex) => {
+    unique(shape.fields.map((field) => field.name), context, ["shapes", shapeIndex, "fields"], "field");
+    shape.fields.forEach((field, fieldIndex) => {
+      const referenced = field.shape ?? (typeof field.list_of === "object" ? field.list_of.shape : void 0);
+      if (referenced && !shapes.has(referenced)) {
+        context.addIssue({ code: "custom", path: ["shapes", shapeIndex, "fields", fieldIndex], message: `references an unknown shape '${referenced}'` });
+      }
+      if (referenced === shape.name) {
+        context.addIssue({ code: "custom", path: ["shapes", shapeIndex, "fields", fieldIndex], message: "shapes cannot contain themselves" });
+      }
+    });
+  });
+  (contract.computations ?? []).forEach((computation, index) => {
+    if (!shapes.has(computation.input)) context.addIssue({ code: "custom", path: ["computations", index, "input"], message: `input names an unknown shape '${computation.input}'` });
+    const output = shapes.get(computation.output);
+    if (!output) {
+      context.addIssue({ code: "custom", path: ["computations", index, "output"], message: `output names an unknown shape '${computation.output}'` });
+      return;
+    }
+    computation.reads.forEach((name, readIndex) => {
+      if (!entities.has(name)) context.addIssue({ code: "custom", path: ["computations", index, "reads", readIndex], message: `reads an unknown entity '${name}'` });
+    });
+    const outputFields = new Map(output.fields.map((field) => [field.name, field]));
+    const integerField = (name, path) => {
+      const field = outputFields.get(name);
+      if (!field) context.addIssue({ code: "custom", path, message: `'${name}' is not a field of ${output.name}` });
+      else if (field.type !== "integer") context.addIssue({ code: "custom", path, message: `properties compare integer fields; '${name}' is not one` });
+    };
+    computation.examples.forEach((example, exampleIndex) => {
+      for (const [name] of Object.entries(example.world ?? {})) {
+        if (!computation.reads.includes(name)) {
+          context.addIssue({
+            code: "custom",
+            path: ["computations", index, "examples", exampleIndex, "world", name],
+            message: `world declares '${name}', which this computation does not read; add it to reads`
+          });
+        }
+      }
+    });
+    computation.properties.forEach((property, propertyIndex) => {
+      const base = ["computations", index, "properties", propertyIndex];
+      integerField(property.field, [...base, "field"]);
+      if (property.kind === "not_greater_than") integerField(property.than, [...base, "than"]);
+      if (property.kind === "equals_difference") {
+        integerField(property.minuend, [...base, "minuend"]);
+        integerField(property.subtrahend, [...base, "subtrahend"]);
+      }
+      if (property.kind === "equals_sum_of") {
+        const collection = outputFields.get(property.collection);
+        const itemShape = collection && typeof collection.list_of === "object" ? shapes.get(collection.list_of.shape) : void 0;
+        if (!itemShape) {
+          context.addIssue({ code: "custom", path: [...base, "collection"], message: `'${property.collection}' must be a list of shapes in ${output.name}` });
+        } else if (itemShape.fields.find((field) => field.name === property.item_field)?.type !== "integer") {
+          context.addIssue({ code: "custom", path: [...base, "item_field"], message: `'${property.item_field}' must be an integer field of ${itemShape.name}` });
+        }
+      }
+    });
+  });
   contract.flows.forEach((flow, flowIndex) => flow.operations.forEach((operation, operationIndex) => {
-    if (!operations.has(operation)) context.addIssue({ code: "custom", path: ["flows", flowIndex, "operations", operationIndex], message: "flow references an unknown operation" });
+    if (!operations.has(operation) && !(contract.computations ?? []).some((item) => item.id === operation)) {
+      context.addIssue({ code: "custom", path: ["flows", flowIndex, "operations", operationIndex], message: "flow references an unknown operation or computation" });
+    }
   }));
 }).transform((contract) => contract);
 function applicationGenerationIssues(contract) {
@@ -22976,11 +23140,271 @@ async function readAliases(lordDirectory, artifact) {
   return external_exports.record(external_exports.string(), external_exports.string()).parse(value);
 }
 
+// src/application/computation-generator.ts
+function goName(value) {
+  return value.split("_").map((part) => part.length === 0 ? "" : part[0].toUpperCase() + part.slice(1)).join("");
+}
+function lowerFirst(value) {
+  return value[0].toLowerCase() + value.slice(1);
+}
+function goScalar(type) {
+  if (type === "integer") return "int64";
+  if (type === "boolean") return "bool";
+  if (type === "datetime") return "time.Time";
+  return "string";
+}
+function goFieldType(field) {
+  if (field.type) return goScalar(field.type);
+  if (field.shape) return field.shape;
+  if (typeof field.list_of === "object") return `[]${field.list_of.shape}`;
+  if (field.list_of) return `[]${goScalar(field.list_of)}`;
+  throw new Error(`Field '${field.name}' declares no type.`);
+}
+function shapesUseTime(shapes) {
+  return shapes.some((shape) => shape.fields.some((field) => field.type === "datetime" || field.list_of === "datetime"));
+}
+function renderShapeStructs(shapes) {
+  return shapes.map((shape) => {
+    const fields = shape.fields.map((field) => `	${goName(field.name)} ${goFieldType(field)} \`json:"${field.name}"\``).join("\n");
+    const title = shape.title ? `// ${shape.title}
+` : "";
+    return `${title}type ${shape.name} struct {
+${fields}
+}`;
+  }).join("\n\n");
+}
+function renderComputationInterfaces(contract) {
+  const methods = (contract.computations ?? []).map((computation) => {
+    const reads = computation.reads.map((name) => {
+      const entity = contract.entities.find((item) => item.name === name);
+      return `${lowerFirst(entity.name)}s []domain.${entity.name}`;
+    });
+    const params = [`request domain.${computation.input}`, ...reads].join(", ");
+    const doc = [
+      `// ${computation.id} computes ${computation.purpose}`,
+      "//",
+      "// The contract holds this result to the following invariants, which are",
+      "// enforced on every response; violating them fails the request:",
+      ...computation.properties.map((property) => `//   - ${property.id}: ${describeProperty(property)}`)
+    ].join("\n");
+    return `${doc}
+	${computation.id}(${params}) (domain.${computation.output}, error)`;
+  }).join("\n\n");
+  return `// Code generated by LORD. DO NOT EDIT.
+package compute
+
+import "${contract.target.module}/internal/domain"
+
+// Engine is the boundary between contract-governed structure and the business
+// logic LORD does not generate. Implement it in an unmanaged file; the
+// generated handlers verify every contractual invariant around your result.
+type Engine interface {
+${methods}
+}
+`;
+}
+function propertyCheck(property, variable) {
+  const field = `${variable}.${goName(property.field)}`;
+  const message = `${property.id}: ${describeProperty(property)}`;
+  switch (property.kind) {
+    case "non_negative":
+      return `	if ${field} < 0 {
+		return fmt.Errorf(${JSON.stringify(message)})
+	}`;
+    case "not_greater_than":
+      return `	if ${field} > ${variable}.${goName(property.than)} {
+		return fmt.Errorf(${JSON.stringify(message)})
+	}`;
+    case "equals_difference":
+      return `	if ${field} != ${variable}.${goName(property.minuend)}-${variable}.${goName(property.subtrahend)} {
+		return fmt.Errorf(${JSON.stringify(message)})
+	}`;
+    case "equals_sum_of": {
+      const total = `sum${goName(property.field)}${goName(property.collection)}`;
+      return `	${total} := int64(0)
+	for _, item := range ${variable}.${goName(property.collection)} {
+		${total} += item.${goName(property.item_field)}
+	}
+	if ${field} != ${total} {
+		return fmt.Errorf(${JSON.stringify(message)})
+	}`;
+    }
+  }
+}
+function renderComputationInvariants(contract) {
+  const functions = (contract.computations ?? []).map((computation) => {
+    const checks = computation.properties.map((property) => propertyCheck(property, "result")).join("\n");
+    return `// Verify${computation.id} enforces the contractual invariants of ${computation.id}.
+func Verify${computation.id}(result domain.${computation.output}) error {
+${checks}
+	return nil
+}`;
+  }).join("\n\n");
+  return `// Code generated by LORD. DO NOT EDIT.
+package compute
+
+import (
+	"fmt"
+
+	"${contract.target.module}/internal/domain"
+)
+
+${functions}
+`;
+}
+function renderComputationHandler(contract, computation) {
+  const reads = computation.reads.map((name) => {
+    const entity = contract.entities.find((item) => item.name === name);
+    return `h.${lowerFirst(entity.name)}s.List()`;
+  });
+  const args = [`request`, ...reads].join(", ");
+  const emit = computation.emits ? `
+	w.Header().Set("X-LORD-Event", "${computation.emits}")
+	h.events.Record("${computation.emits}", nil)` : "";
+  return `func (h *Handler) ${lowerFirst(computation.id)}(w http.ResponseWriter, r *http.Request) {
+	var request domain.${computation.input}
+	if err := decodeJSON(r, &request); err != nil { writeError(w, http.StatusBadRequest, "invalid JSON body"); return }
+	result, err := h.engine.${computation.id}(${args})
+	if err != nil { writeError(w, http.StatusUnprocessableEntity, err.Error()); return }
+	if err := compute.Verify${computation.id}(result); err != nil {
+		// The implementation broke a contractual invariant: fail closed rather
+		// than return a result the contract does not admit.
+		writeError(w, http.StatusInternalServerError, "contract invariant violated: "+err.Error()); return
+	}${emit}
+	writeJSON(w, http.StatusOK, result)
+}`;
+}
+function renderEngineScaffold(contract) {
+  const methods = (contract.computations ?? []).map((computation) => {
+    const reads = computation.reads.map((name) => {
+      const entity = contract.entities.find((item) => item.name === name);
+      return `${lowerFirst(entity.name)}s []domain.${entity.name}`;
+    });
+    const params = [`request domain.${computation.input}`, ...reads].join(", ");
+    const invariants = computation.properties.map((property) => `//   - ${property.id}: ${describeProperty(property)}`).join("\n");
+    return `// ${computation.id}: ${computation.purpose}
+//
+// Contractual invariants (enforced on every response, and by derived tests):
+${invariants}
+func (e *BusinessEngine) ${computation.id}(${params}) (domain.${computation.output}, error) {
+	return domain.${computation.output}{}, errors.New("${computation.id} is not implemented yet")
+}`;
+  }).join("\n\n");
+  return `package compute
+
+// This file is yours. LORD created it once and will never overwrite it.
+// Implement the business logic the contract cannot express; the generated
+// code around it enforces every contractual invariant on every response.
+
+import (
+	"errors"
+
+	"${contract.target.module}/internal/domain"
+)
+
+type BusinessEngine struct{}
+
+func NewBusinessEngine() *BusinessEngine { return &BusinessEngine{} }
+
+${methods}
+`;
+}
+function goValue(value, indent = "	") {
+  if (value === null || value === void 0) return "nil";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(JSON.stringify(value));
+}
+function renderComputationTests(contract) {
+  if ((contract.computations ?? []).length === 0) return "";
+  const blocks = (contract.computations ?? []).flatMap((computation) => {
+    const output = (contract.shapes ?? []).find((shape) => shape.name === computation.output);
+    const violations = computation.properties.map((property) => {
+      const broken = brokenResult(output, property);
+      return `	t.Run(${JSON.stringify(property.id)}, func(t *testing.T) {
+		if err := compute.Verify${computation.id}(${broken}); err == nil {
+			t.Fatalf(${JSON.stringify(`${property.id} must be rejected: ${describeProperty(property)}`)})
+		}
+	})`;
+    }).join("\n");
+    const invariantTest = `func Test${computation.id}InvariantsRejectViolations(t *testing.T) {
+${violations}
+}`;
+    const exampleTests = computation.examples.map((example) => {
+      const worldSetup = computation.reads.map((name) => {
+        const variable = `${lowerFirst(name)}s`;
+        const records = example.world?.[name] ?? [];
+        return `	var ${variable} []domain.${name}
+	if err := json.Unmarshal([]byte(${goValue(records)}), &${variable}); err != nil { t.Fatal(err) }`;
+      }).join("\n");
+      const args = ["request", ...computation.reads.map((name) => `${lowerFirst(name)}s`)].join(", ");
+      return `func Test${computation.id}${goName(example.id.replace(/-/g, "_"))}(t *testing.T) {
+	// ${example.title}
+	var request domain.${computation.input}
+	if err := json.Unmarshal([]byte(${goValue(example.given)}), &request); err != nil { t.Fatal(err) }
+${worldSetup}
+	result, err := compute.NewBusinessEngine().${computation.id}(${args})
+	if err != nil { t.Fatalf("${example.id}: %v", err) }
+	if err := compute.Verify${computation.id}(result); err != nil { t.Fatalf("${example.id} violates its contract: %v", err) }
+	actual, err := json.Marshal(result)
+	if err != nil { t.Fatal(err) }
+	var got, want map[string]any
+	if err := json.Unmarshal(actual, &got); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal([]byte(${goValue(example.expect)}), &want); err != nil { t.Fatal(err) }
+	for key, expected := range want {
+		if fmt.Sprint(got[key]) != fmt.Sprint(expected) {
+			t.Fatalf("${example.id}: %s = %v, want %v", key, got[key], expected)
+		}
+	}
+}`;
+    });
+    return [invariantTest, ...exampleTests];
+  });
+  const usesExamples = (contract.computations ?? []).some((computation) => computation.examples.length > 0);
+  const imports = ['	"testing"', ...usesExamples ? ['	"encoding/json"', '	"fmt"'] : []].sort();
+  const domainImport = `
+	"${contract.target.module}/internal/domain"`;
+  return `// Code generated by LORD. DO NOT EDIT.
+package compute_test
+
+import (
+${imports.join("\n")}
+
+	"${contract.target.module}/internal/compute"${domainImport}
+)
+
+${blocks.join("\n\n")}
+`;
+}
+function brokenResult(output, property) {
+  const assignments = [];
+  switch (property.kind) {
+    case "non_negative":
+      assignments.push(`${goName(property.field)}: -1`);
+      break;
+    case "not_greater_than":
+      assignments.push(`${goName(property.field)}: 10`, `${goName(property.than)}: 1`);
+      break;
+    case "equals_difference":
+      assignments.push(`${goName(property.field)}: 999`, `${goName(property.minuend)}: 10`, `${goName(property.subtrahend)}: 1`);
+      break;
+    case "equals_sum_of": {
+      const collection = output.fields.find((field) => field.name === property.collection);
+      const itemShape = typeof collection.list_of === "object" ? collection.list_of.shape : "";
+      assignments.push(`${goName(property.field)}: 999`, `${goName(property.collection)}: []domain.${itemShape}{{${goName(property.item_field)}: 1}}`);
+      break;
+    }
+  }
+  return `domain.${output.name}{${assignments.join(", ")}}`;
+}
+
 // src/application/generator.ts
 function generateGoRestApplication(contract) {
   const sqlite = contract.entities.some((entity) => entity.storage === "sqlite");
+  const computes = (contract.computations ?? []).length > 0;
   return {
     contract_id: fingerprint(contract),
+    scaffold: computes ? { "internal/compute/engine.go": renderEngineScaffold(contract) } : {},
     files: {
       "go.mod": renderGoMod(contract),
       "cmd/api/main.go": renderMain(contract),
@@ -22988,6 +23412,11 @@ function generateGoRestApplication(contract) {
       "internal/store/memory.go": renderStores(contract),
       ...sqlite ? { "internal/store/sqlite.go": renderSqliteStores(contract) } : {},
       "internal/observability/events.go": renderObservability(sqlite),
+      ...computes ? {
+        "internal/compute/contract.go": renderComputationInterfaces(contract),
+        "internal/compute/invariants.go": renderComputationInvariants(contract),
+        "internal/compute/invariants_test.go": renderComputationTests(contract)
+      } : {},
       "internal/httpapi/handler.go": renderHandler(contract),
       "internal/httpapi/handler_test.go": renderHandlerTests(contract)
     }
@@ -22996,11 +23425,12 @@ function generateGoRestApplication(contract) {
 function renderHandlerTests(contract) {
   const sqliteEntities = contract.entities.filter((entity) => entity.storage === "sqlite");
   const storeArgs = contract.entities.map((entity) => entity.storage === "sqlite" ? `store.New${entity.name}Store(db)` : `store.New${entity.name}Store()`).join(", ");
-  const stores = sqliteEntities.length > 0 ? "newTestHandler()" : `NewHandler(${contract.entities.map((entity) => `store.New${entity.name}Store()`).join(", ")})`;
+  const engineArg = (contract.computations ?? []).length > 0 ? "compute.NewBusinessEngine(), " : "";
+  const stores = sqliteEntities.length > 0 ? "newTestHandler()" : `NewHandler(${engineArg}${contract.entities.map((entity) => `store.New${entity.name}Store()`).join(", ")})`;
   const testHelper = sqliteEntities.length > 0 ? `
 func newTestHandler() http.Handler {
 	db := store.NewTestDatabase()
-	return NewHandler(${storeArgs})
+	return NewHandler(${engineArg}${storeArgs})
 }
 ` : "";
   const tests = contract.entities.flatMap((entity) => {
@@ -23131,6 +23561,8 @@ ${steps.join("\n")}
     return blocks;
   }).join("\n\n");
   const stringImport = contract.operations.some((operation) => operation.kind === "list" && operation.parameters.length > 0) ? '\n	"strings"' : "";
+  const computeTestImport = (contract.computations ?? []).length > 0 ? `
+	"${contract.target.module}/internal/compute"` : "";
   return `// Code generated by LORD. DO NOT EDIT.
 package httpapi
 
@@ -23140,7 +23572,7 @@ import (
 	"net/http"
 	"net/http/httptest"${stringImport}
 	"testing"
-
+${computeTestImport}
 	"${contract.target.module}/internal/store"
 )
 ${testHelper}
@@ -23254,7 +23686,7 @@ function renderImmutableFieldTest(contract, entity, create, update, field, store
   const idValue = String(original[entity.id_field]);
   const changed = { ...original, [field.name]: changedSampleValue(field, original[field.name]) };
   const setup = referencedSetupSteps(contract, entity);
-  return `func Test${entity.name}${goName(field.name)}IsImmutable(t *testing.T) {
+  return `func Test${entity.name}${goName2(field.name)}IsImmutable(t *testing.T) {
 	handler := ${stores}${setup.length ? `
 ${setup.join("\n")}` : ""}
 	request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(original))})))
@@ -23279,11 +23711,11 @@ function renderIntegerBoundaryTest(contract, entity, create, field, stores) {
     { name: "above_maximum", value: field.maximum + 1, status: "http.StatusBadRequest" }
   );
   const rows = cases.map((item) => {
-    const body = { ...base, [entity.id_field]: `${entity.name.toUpperCase()}-${goName(field.name).toUpperCase()}-${item.name}`, [field.name]: item.value };
+    const body = { ...base, [entity.id_field]: `${entity.name.toUpperCase()}-${goName2(field.name).toUpperCase()}-${item.name}`, [field.name]: item.value };
     return `		{name: ${JSON.stringify(item.name)}, body: ${JSON.stringify(JSON.stringify(body))}, want: ${item.status}},`;
   }).join("\n");
   const setup = referencedSetupSteps(contract, entity).map((step) => step.split("\n").map((line) => `		${line.slice(1)}`).join("\n")).join("\n");
-  return `func Test${entity.name}${goName(field.name)}ContractBoundaries(t *testing.T) {
+  return `func Test${entity.name}${goName2(field.name)}ContractBoundaries(t *testing.T) {
 	cases := []struct {
 		name string
 		body string
@@ -23430,19 +23862,23 @@ function renderMain(contract) {
 		log.Fatal(err)
 	}
 	` : "";
-  const stores = contract.entities.map((entity) => entity.storage === "sqlite" ? `${lowerFirst(entity.name)}Store := store.New${entity.name}Store(db)` : `${lowerFirst(entity.name)}Store := store.New${entity.name}Store()`).join("\n	");
-  const args = contract.entities.map((entity) => `${lowerFirst(entity.name)}Store`).join(", ");
-  const construct = sqlite ? `httpapi.NewHandlerWithHistory(!hadRows, ${args})` : `httpapi.NewHandler(${args})`;
+  const stores = contract.entities.map((entity) => entity.storage === "sqlite" ? `${lowerFirst2(entity.name)}Store := store.New${entity.name}Store(db)` : `${lowerFirst2(entity.name)}Store := store.New${entity.name}Store()`).join("\n	");
+  const computes = (contract.computations ?? []).length > 0;
+  const engineArg = computes ? "compute.NewBusinessEngine(), " : "";
+  const args = contract.entities.map((entity) => `${lowerFirst2(entity.name)}Store`).join(", ");
+  const construct = sqlite ? `httpapi.NewHandlerWithHistory(!hadRows, ${engineArg}${args})` : `httpapi.NewHandler(${engineArg}${args})`;
   const imports = sqlite ? `	"log"
 	"net/http"
 	"os"` : `	"log"
 	"net/http"`;
+  const computeImport = computes ? `
+	"${contract.target.module}/internal/compute"` : "";
   return `// Code generated by LORD. DO NOT EDIT.
 package main
 
 import (
 ${imports}
-
+${computeImport}
 	"${contract.target.module}/internal/httpapi"
 	"${contract.target.module}/internal/store"
 )
@@ -23511,23 +23947,26 @@ func (r *Recorder) Snapshot() []Event {
 `;
 }
 function renderEntities(contract) {
-  const usesTime = contract.entities.some((entity) => entity.fields.some((field) => field.type === "datetime"));
+  const usesTime = contract.entities.some((entity) => entity.fields.some((field) => field.type === "datetime")) || shapesUseTime(contract.shapes ?? []);
   const structs = contract.entities.map((entity) => {
-    const fields = entity.fields.map((field) => `	${goName(field.name)} ${goType(field.type)} \`json:"${field.name}"\``).join("\n");
+    const fields = entity.fields.map((field) => `	${goName2(field.name)} ${goType(field.type)} \`json:"${field.name}"\``).join("\n");
     return `type ${entity.name} struct {
 ${fields}
 }`;
   }).join("\n\n");
+  const shapeStructs = (contract.shapes ?? []).length > 0 ? `
+
+${renderShapeStructs(contract.shapes ?? [])}` : "";
   return `// Code generated by LORD. DO NOT EDIT.
 package domain
 ${usesTime ? '\nimport "time"\n' : ""}
-${structs}
+${structs}${shapeStructs}
 `;
 }
 function renderStores(contract) {
   const blocks = contract.entities.filter((entity) => entity.storage === "memory").map((entity) => {
     const store = `${entity.name}Store`;
-    const id = goName(entity.id_field);
+    const id = goName2(entity.id_field);
     return `type ${store} struct {
 	mu sync.RWMutex
 	items map[string]domain.${entity.name}
@@ -23658,11 +24097,11 @@ ${expected}
 			return ErrInvalidReference
 		}` : "";
     const store = `${entity.name}Store`;
-    const id = goName(entity.id_field);
+    const id = goName2(entity.id_field);
     const columnNames = entity.fields.map((field) => field.name).join(", ");
     const placeholders = entity.fields.map(() => "?").join(", ");
     const writeArg = (field) => {
-      const name = goName(field.name);
+      const name = goName2(field.name);
       if (field.type === "datetime") return `formatStoredTime(value.${name})`;
       if (field.type === "boolean") return `storedBool(value.${name})`;
       return `value.${name}`;
@@ -23672,18 +24111,18 @@ ${expected}
     const updateSet = updateColumns.map((field) => `${field.name} = ?`).join(", ");
     const updateArgs = [...updateColumns.map(writeArg), `value.${id}`].join(", ");
     const scanRaw = entity.fields.map((field) => {
-      if (field.type === "datetime") return `	var ${lowerFirst(goName(field.name))}Raw string`;
-      if (field.type === "boolean") return `	var ${lowerFirst(goName(field.name))}Raw int64`;
+      if (field.type === "datetime") return `	var ${lowerFirst2(goName2(field.name))}Raw string`;
+      if (field.type === "boolean") return `	var ${lowerFirst2(goName2(field.name))}Raw int64`;
       return null;
     }).filter((line) => line !== null).join("\n");
     const scanTargets = entity.fields.map((field) => {
-      if (field.type === "datetime" || field.type === "boolean") return `&${lowerFirst(goName(field.name))}Raw`;
-      return `&value.${goName(field.name)}`;
+      if (field.type === "datetime" || field.type === "boolean") return `&${lowerFirst2(goName2(field.name))}Raw`;
+      return `&value.${goName2(field.name)}`;
     }).join(", ");
     const scanAssign = entity.fields.map((field) => {
-      const name = goName(field.name);
-      if (field.type === "datetime") return `	value.${name} = parseStoredTime(${lowerFirst(name)}Raw)`;
-      if (field.type === "boolean") return `	value.${name} = ${lowerFirst(name)}Raw != 0`;
+      const name = goName2(field.name);
+      if (field.type === "datetime") return `	value.${name} = parseStoredTime(${lowerFirst2(name)}Raw)`;
+      if (field.type === "boolean") return `	value.${name} = ${lowerFirst2(name)}Raw != 0`;
       return null;
     }).filter((line) => line !== null).join("\n");
     return `type ${store} struct{ db *sql.DB }
@@ -23878,11 +24317,28 @@ ${stores}${timeHelpers}${boolHelper}
 `;
 }
 function renderHandler(contract) {
-  const fields = contract.entities.map((entity) => `	${lowerFirst(entity.name)}s *store.${entity.name}Store`).join("\n");
-  const params = contract.entities.map((entity) => `${lowerFirst(entity.name)}s *store.${entity.name}Store`).join(", ");
-  const assignments = contract.entities.map((entity) => `${lowerFirst(entity.name)}s: ${lowerFirst(entity.name)}s`).join(", ");
-  const routes = contract.operations.map((operation) => `	mux.HandleFunc("${operation.method} ${operation.path}", handler.${lowerFirst(operation.id)})`).join("\n");
-  const handlers = contract.operations.map((operation) => renderOperation(contract, operation)).join("\n\n");
+  const computesEarly = (contract.computations ?? []).length > 0;
+  const fields = [
+    ...contract.entities.map((entity) => `	${lowerFirst2(entity.name)}s *store.${entity.name}Store`),
+    ...computesEarly ? ["	engine compute.Engine"] : []
+  ].join("\n");
+  const params = [
+    ...computesEarly ? ["engine compute.Engine"] : [],
+    ...contract.entities.map((entity) => `${lowerFirst2(entity.name)}s *store.${entity.name}Store`)
+  ].join(", ");
+  const assignments = [
+    ...contract.entities.map((entity) => `${lowerFirst2(entity.name)}s: ${lowerFirst2(entity.name)}s`),
+    ...computesEarly ? ["engine: engine"] : []
+  ].join(", ");
+  const computes = (contract.computations ?? []).length > 0;
+  const routes = [
+    ...contract.operations.map((operation) => `	mux.HandleFunc("${operation.method} ${operation.path}", handler.${lowerFirst2(operation.id)})`),
+    ...(contract.computations ?? []).map((computation) => `	mux.HandleFunc("${computation.method} ${computation.path}", handler.${lowerFirst2(computation.id)})`)
+  ].join("\n");
+  const handlers = [
+    ...contract.operations.map((operation) => renderOperation(contract, operation)),
+    ...(contract.computations ?? []).map((computation) => renderComputationHandler(contract, computation))
+  ].join("\n\n");
   const validators = contract.entities.map((entity) => renderValidator(entity)).join("\n\n");
   const standardImports = ["encoding/json", "errors", "io", "net/http"];
   if (contract.entities.some((entity) => entity.fields.some((field) => field.minimum !== void 0 || field.maximum !== void 0))) standardImports.push("fmt");
@@ -23892,6 +24348,10 @@ function renderHandler(contract) {
   standardImports.sort();
   const sqlite = contract.entities.some((entity) => entity.storage === "sqlite");
   const historyLiteral = sqlite ? "handler.events.HistoryComplete()" : "true";
+  const forwardArgs = [
+    ...computes ? ["engine"] : [],
+    ...contract.entities.map((entity) => `${lowerFirst2(entity.name)}s`)
+  ].join(", ");
   const base = `
 
 func NewHandler(${params}) http.Handler {
@@ -23905,7 +24365,7 @@ ${routes}
   const constructors = sqlite ? base.replace("func NewHandler(", "func newHandler(").replace("return mux", "return handler, mux").replace(") http.Handler {", ") (*Handler, http.Handler) {") + `
 
 func NewHandler(${params}) http.Handler {
-	_, mux := newHandler(${contract.entities.map((entity) => `${lowerFirst(entity.name)}s`).join(", ")})
+	_, mux := newHandler(${forwardArgs})
 	return mux
 }
 
@@ -23913,19 +24373,21 @@ func NewHandler(${params}) http.Handler {
 // service starting over pre-existing persistent state must declare an
 // incomplete history so runtime verification stays honest.
 func NewHandlerWithHistory(historyComplete bool, ${params}) http.Handler {
-	handler, mux := newHandler(${contract.entities.map((entity) => `${lowerFirst(entity.name)}s`).join(", ")})
+	handler, mux := newHandler(${forwardArgs})
 	if !historyComplete {
 		handler.events.MarkHistoryIncomplete()
 	}
 	return mux
 }` : base;
   const imports = standardImports.map((item) => `	"${item}"`).join("\n");
+  const computeImport = computes ? `
+	"${contract.target.module}/internal/compute"` : "";
   return `// Code generated by LORD. DO NOT EDIT.
 package httpapi
 
 import (
 ${imports}
-
+${computeImport}
 	"${contract.target.module}/internal/domain"
 	"${contract.target.module}/internal/observability"
 	"${contract.target.module}/internal/store"
@@ -23958,9 +24420,9 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 }
 function renderOperation(contract, operation) {
   const entity = contract.entities.find((item) => item.name === operation.entity);
-  const receiver = `h.${lowerFirst(entity.name)}s`;
-  const functionName = lowerFirst(operation.id);
-  const id = goName(entity.id_field);
+  const receiver = `h.${lowerFirst2(entity.name)}s`;
+  const functionName = lowerFirst2(operation.id);
+  const id = goName2(entity.id_field);
   const emit = renderEmit(operation, operation.kind === "list" ? null : "value");
   if (operation.kind === "update") return renderGovernedUpdateOperation(contract, operation, entity, receiver, functionName, id, emit);
   if (operation.kind === "get") return renderGetOperation(contract, operation, entity, receiver, functionName, emit);
@@ -23977,7 +24439,7 @@ function renderOperation(contract, operation) {
 	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }${renderReferenceChecks(contract, entity, "value")}${renderGuardChecks(contract, entity, operation, "value")}${renderPrecondition(contract, entity, operation, "value")}
 	if err := ${receiver}.Create(value); err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) { writeError(w, http.StatusConflict, "${entity.id_field} already exists"); return }${referenceCreateMapping}
-		writeError(w, http.StatusInternalServerError, "could not create ${lowerFirst(entity.name)}"); return
+		writeError(w, http.StatusInternalServerError, "could not create ${lowerFirst2(entity.name)}"); return
 	}${emit}
 	writeJSON(w, http.StatusCreated, value)
 }`;
@@ -23991,13 +24453,13 @@ function renderOperation(contract, operation) {
 	if value.${id} != id { writeError(w, http.StatusBadRequest, "immutable ${entity.id_field} does not match path"); return }
 	apply${entity.name}Defaults(&value)
 	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
-	if err := ${receiver}.Update(value); err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not update ${lowerFirst(entity.name)}"); return }${emit}
+	if err := ${receiver}.Update(value); err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not update ${lowerFirst2(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
     case "get":
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	value, err := ${receiver}.Get(r.PathValue("id"))
-	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${emit}
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst2(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
     case "list":
@@ -24006,28 +24468,28 @@ function renderOperation(contract, operation) {
 }`;
     case "transition": {
       if (!operation.transition) throw new Error(`Operation '${operation.id}' has no transition semantics.`);
-      const field = goName(operation.transition.field);
+      const field = goName2(operation.transition.field);
       const expected = operation.transition.from === void 0 ? "" : `
 	if value.${field} != ${goLiteral(operation.transition.from)} { writeError(w, http.StatusConflict, "transition requires ${operation.transition.field}=${String(operation.transition.from)}"); return }`;
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	value, err := ${receiver}.Get(r.PathValue("${pathIDToken(operation, entity)}"))
-	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${renderGuardChecks(contract, entity, operation, "value")}${expected}
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst2(entity.name)}"); return }${renderGuardChecks(contract, entity, operation, "value")}${expected}
 	value.${field} = ${goLiteral(operation.transition.to)}${renderPrecondition(contract, entity, operation, "value")}
-	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not transition ${lowerFirst(entity.name)}"); return }${emit}
+	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not transition ${lowerFirst2(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
     }
     case "evaluate_validity": {
       const policy = contract.policies.find((item) => item.entity === entity.name);
       if (!policy) throw new Error(`Operation '${operation.id}' requires an active_between policy for '${entity.name}'.`);
-      const start = goName(policy.start_field);
-      const end = goName(policy.end_field);
-      const enabled = policy.enabled_field ? ` && value.${goName(policy.enabled_field)}` : "";
+      const start = goName2(policy.start_field);
+      const end = goName2(policy.end_field);
+      const enabled = policy.enabled_field ? ` && value.${goName2(policy.enabled_field)}` : "";
       const instant = operation.parameters.find((parameter) => parameter.in === "query" && parameter.type === "datetime" && parameter.required);
       if (!instant) throw new Error(`Operation '${operation.id}' requires one datetime query parameter.`);
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	value, err := ${receiver}.Get(r.PathValue("id"))
-	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst2(entity.name)}"); return }
 	evaluatedAt, err := time.Parse(time.RFC3339, r.URL.Query().Get("${instant.name}"))
 	if err != nil { writeError(w, http.StatusBadRequest, "${instant.name} must be an RFC3339 timestamp"); return }
 	valid := !evaluatedAt.Before(value.${start}) && evaluatedAt.Before(value.${end})${enabled}${emit}
@@ -24040,7 +24502,7 @@ function renderGovernedUpdateOperation(contract, operation, entity, receiver, fu
   const guards = renderGuardChecks(contract, operation.entity === entity.name ? entity : entity, operation, "current");
   const guard = guards || "\n	_ = current";
   const immutableChecks = entity.fields.filter((field) => field.immutable && field.name !== entity.id_field).map((field) => {
-    const name = goName(field.name);
+    const name = goName2(field.name);
     const keepCurrent = field.type === "string" ? `
 	if value.${name} == "" { value.${name} = current.${name} }` : field.type === "integer" ? `
 	if value.${name} == 0 { value.${name} = current.${name} }` : field.type === "datetime" ? `
@@ -24051,7 +24513,7 @@ function renderGovernedUpdateOperation(contract, operation, entity, receiver, fu
   }).join("");
   return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	current, err := ${receiver}.Get(r.PathValue("${pathIDToken(operation, entity)}"))
-	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${guard}
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst2(entity.name)}"); return }${guard}
 	var value domain.${entity.name}
 	if err := decodeJSON(r, &value); err != nil { writeError(w, http.StatusBadRequest, "invalid JSON body"); return }
 	id := r.PathValue("${pathIDToken(operation, entity)}")
@@ -24059,7 +24521,7 @@ function renderGovernedUpdateOperation(contract, operation, entity, receiver, fu
 	if value.${id} != id { writeError(w, http.StatusBadRequest, "immutable ${entity.id_field} does not match path"); return }${immutableChecks}
 	apply${entity.name}Defaults(&value)
 	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }${renderReferenceChecks(contract, entity, "value")}${renderPrecondition(contract, entity, operation, "value")}
-	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not update ${lowerFirst(entity.name)}"); return }${emit}
+	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not update ${lowerFirst2(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
 }
@@ -24067,7 +24529,7 @@ function renderGetOperation(contract, operation, entity, receiver, functionName,
   const guard = renderGuardChecks(contract, entity, operation, "value");
   return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	value, err := ${receiver}.Get(r.PathValue("${pathIDToken(operation, entity)}"))
-	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${guard}${emit}
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst2(entity.name)}"); return }${guard}${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
 }
@@ -24075,7 +24537,7 @@ function renderListOperation(operation, entity, receiver, functionName, emit) {
   const filters = operation.parameters.map((parameter, index) => {
     const raw = `raw${index}`;
     const parsed = `filter${index}`;
-    const field = goName(parameter.field);
+    const field = goName2(parameter.field);
     const required2 = parameter.required ? `
 	if ${raw} == "" { writeError(w, http.StatusBadRequest, "${parameter.name} is required"); return }` : "";
     const parse3 = parameter.type === "boolean" ? `
@@ -24105,14 +24567,14 @@ function renderValidityOperation(contract, operation, entity, receiver, function
   if (!policy) throw new Error(`Operation '${operation.id}' requires an active_between policy for '${entity.name}'.`);
   const instant = operation.parameters.find((parameter) => parameter.in === "query" && parameter.type === "datetime" && parameter.required);
   if (!instant) throw new Error(`Operation '${operation.id}' requires one datetime query parameter.`);
-  const enabled = policy.enabled_field ? ` && value.${goName(policy.enabled_field)}` : "";
+  const enabled = policy.enabled_field ? ` && value.${goName2(policy.enabled_field)}` : "";
   const guard = renderGuardChecks(contract, entity, operation, "value");
   return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	value, err := ${receiver}.Get(r.PathValue("${pathIDToken(operation, entity)}"))
-	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${guard}
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst2(entity.name)}"); return }${guard}
 	evaluatedAt, err := time.Parse(time.RFC3339, r.URL.Query().Get("${instant.name}"))
 	if err != nil { writeError(w, http.StatusBadRequest, "${instant.name} must be an RFC3339 timestamp"); return }
-	valid := !evaluatedAt.Before(value.${goName(policy.start_field)}) && evaluatedAt.Before(value.${goName(policy.end_field)})${enabled}${emit}
+	valid := !evaluatedAt.Before(value.${goName2(policy.start_field)}) && evaluatedAt.Before(value.${goName2(policy.end_field)})${enabled}${emit}
 	writeJSON(w, http.StatusOK, map[string]any{"id": value.${id}, "valid": valid, "${instant.name}": evaluatedAt, "characteristics": value})
 }`;
 }
@@ -24137,22 +24599,22 @@ function renderPrecondition(contract, entity, operation, valueVariable) {
     const policy = contract.policies.find((item) => item.id === requires.policy);
     if (!policy) throw new Error(`Operation '${operation.id}' names unknown policy '${requires.policy}'.`);
     const target = referencedEntityFor(contract, entity, requires.via);
-    const variable = `policyVia${goName(requires.via)}`;
-    const enabled = policy.enabled_field ? ` || !${variable}.${goName(policy.enabled_field)}` : "";
-    const message = `${operation.id} requires the ${lowerFirst(target.name)} referenced by ${requires.via} to satisfy ${policy.id}`;
-    check3 = `${variable}, err := h.${lowerFirst(target.name)}s.Get(${valueVariable}.${goName(requires.via)})
-	if err != nil { writeError(w, http.StatusConflict, "${requires.via} references a ${lowerFirst(target.name)} that does not exist"); return }
+    const variable = `policyVia${goName2(requires.via)}`;
+    const enabled = policy.enabled_field ? ` || !${variable}.${goName2(policy.enabled_field)}` : "";
+    const message = `${operation.id} requires the ${lowerFirst2(target.name)} referenced by ${requires.via} to satisfy ${policy.id}`;
+    check3 = `${variable}, err := h.${lowerFirst2(target.name)}s.Get(${valueVariable}.${goName2(requires.via)})
+	if err != nil { writeError(w, http.StatusConflict, "${requires.via} references a ${lowerFirst2(target.name)} that does not exist"); return }
 	now := time.Now().UTC()
-	if now.Before(${variable}.${goName(policy.start_field)}) || !now.Before(${variable}.${goName(policy.end_field)})${enabled} { writeError(w, http.StatusConflict, "${message}"); return }`;
+	if now.Before(${variable}.${goName2(policy.start_field)}) || !now.Before(${variable}.${goName2(policy.end_field)})${enabled} { writeError(w, http.StatusConflict, "${message}"); return }`;
   } else {
-    const requiresName = goName(requires.field);
+    const requiresName = goName2(requires.field);
     const failure = "after" in requires ? `!${valueVariable}.${requiresName}.After(time.Now().UTC())` : `${valueVariable}.${requiresName}.Before(time.Now().UTC())`;
     check3 = `if ${failure} { writeError(w, http.StatusConflict, "${preconditionMessage(operation)}"); return }`;
   }
   if (!precondition.when) return `
 	${check3}`;
   return `
-	if ${valueVariable}.${goName(precondition.when.field)} == ${goLiteral(precondition.when.equals)} {
+	if ${valueVariable}.${goName2(precondition.when.field)} == ${goLiteral(precondition.when.equals)} {
 		${check3.split("\n	").join("\n		")}
 	}`;
 }
@@ -24167,7 +24629,7 @@ function operationGuards(operation) {
   return [...operation.state_guard ? [operation.state_guard] : [], ...operation.state_guards ?? []];
 }
 function guardFailureExpr(guard, valueVariable) {
-  const name = goName(guard.field);
+  const name = goName2(guard.field);
   if ("equals" in guard) return `${valueVariable}.${name} != ${goLiteral(guard.equals)}`;
   return guard.in.map((member) => `${valueVariable}.${name} != ${JSON.stringify(member)}`).join(" && ");
 }
@@ -24181,7 +24643,7 @@ function guardBlocksValue(guard, value) {
 }
 function viaGuardMessage(guard, target) {
   const condition = "equals" in guard ? `${guard.field}=${String(guard.equals)}` : `${guard.field} in [${guard.in.join(" ")}]`;
-  return `operation requires its ${lowerFirst(target.name)} (via ${guard.via}) to have ${condition}`;
+  return `operation requires its ${lowerFirst2(target.name)} (via ${guard.via}) to have ${condition}`;
 }
 function renderGuardChecks(contract, entity, operation, valueVariable) {
   const lines = [];
@@ -24189,11 +24651,11 @@ function renderGuardChecks(contract, entity, operation, valueVariable) {
   for (const guard of operationGuards(operation)) {
     if (guard.via) {
       const target = referencedEntityFor(contract, entity, guard.via);
-      const variable = `via${goName(guard.via)}`;
+      const variable = `via${goName2(guard.via)}`;
       if (!fetched.has(guard.via)) {
         fetched.add(guard.via);
-        lines.push(`${variable}, err := h.${lowerFirst(target.name)}s.Get(${valueVariable}.${goName(guard.via)})`);
-        lines.push(`if err != nil { writeError(w, http.StatusConflict, "${guard.via} references a ${lowerFirst(target.name)} that does not exist"); return }`);
+        lines.push(`${variable}, err := h.${lowerFirst2(target.name)}s.Get(${valueVariable}.${goName2(guard.via)})`);
+        lines.push(`if err != nil { writeError(w, http.StatusConflict, "${guard.via} references a ${lowerFirst2(target.name)} that does not exist"); return }`);
       }
       lines.push(`if ${guardFailureExpr(guard, variable)} { writeError(w, http.StatusConflict, "${viaGuardMessage(guard, target)}"); return }`);
     } else {
@@ -24207,17 +24669,17 @@ function renderReferenceChecks(contract, entity, valueVariable) {
   return entity.fields.filter((field) => field.references).map((field) => {
     const target = contract.entities.find((item) => item.name === field.references.entity);
     if (!target) throw new Error(`Field '${field.name}' of ${entity.name} references unknown entity.`);
-    const check3 = `if _, err := h.${lowerFirst(target.name)}s.Get(${valueVariable}.${goName(field.name)}); err != nil { writeError(w, http.StatusConflict, "${field.name} references a ${lowerFirst(target.name)} that does not exist"); return }`;
+    const check3 = `if _, err := h.${lowerFirst2(target.name)}s.Get(${valueVariable}.${goName2(field.name)}); err != nil { writeError(w, http.StatusConflict, "${field.name} references a ${lowerFirst2(target.name)} that does not exist"); return }`;
     return field.required ? `
 	${check3}` : `
-	if ${valueVariable}.${goName(field.name)} != "" {
+	if ${valueVariable}.${goName2(field.name)} != "" {
 		${check3}
 	}`;
   }).join("");
 }
 function renderEmit(operation, valueVariable) {
   if (!operation.emits) return "";
-  const pairs = Object.entries(operation.correlation).map(([key, field]) => `${JSON.stringify(key)}: ${valueVariable}.${goName(field)}`);
+  const pairs = Object.entries(operation.correlation).map(([key, field]) => `${JSON.stringify(key)}: ${valueVariable}.${goName2(field)}`);
   const data = pairs.length === 0 ? "nil" : `map[string]any{${pairs.join(", ")}}`;
   return `
 	w.Header().Set("X-LORD-Event", "${operation.emits}")
@@ -24239,12 +24701,12 @@ ${checks}${dateOrder}
 }`;
 }
 function renderDefault(field) {
-  const name = goName(field.name);
+  const name = goName2(field.name);
   if (field.type === "integer") return `	if value.${name} == 0 { value.${name} = ${String(field.default)} }`;
   return `	if value.${name} == "" { value.${name} = ${JSON.stringify(field.default)} }`;
 }
 function renderChecks(field) {
-  const name = goName(field.name);
+  const name = goName2(field.name);
   const checks = [];
   if (field.required) {
     if (field.type === "string") checks.push(`	if strings.TrimSpace(value.${name}) == "" { return errors.New("${field.name} is required") }`);
@@ -24258,10 +24720,10 @@ function renderChecks(field) {
 function goLiteral(value) {
   return typeof value === "boolean" ? String(value) : JSON.stringify(value);
 }
-function goName(value) {
+function goName2(value) {
   return value.split("_").map((part) => part.length === 0 ? "" : part[0].toUpperCase() + part.slice(1)).join("");
 }
-function lowerFirst(value) {
+function lowerFirst2(value) {
   return value[0].toLowerCase() + value.slice(1);
 }
 function goType(type) {
@@ -24275,6 +24737,7 @@ function goType(type) {
 var execFileAsync = (0, import_node_util.promisify)(import_node_child_process.execFile);
 async function previewApplicationGeneration(workspace, contract) {
   const generated = generateGoRestApplication(contract);
+  generated.scaffold = await formatGeneratedFiles(generated.scaffold);
   const files = await formatGeneratedFiles(generated.files);
   const previous = await readGenerationManifest(workspace);
   const changes = [];
@@ -24289,6 +24752,19 @@ async function previewApplicationGeneration(workspace, contract) {
       status: before === null ? "create" : beforeHash === afterHash ? "unchanged" : managedHash === beforeHash ? "replace_managed" : "replace_unmanaged",
       before_hash: beforeHash,
       after_hash: afterHash
+    });
+  }
+  for (const [path, content] of Object.entries(generated.scaffold)) {
+    const absolute = (0, import_node_path2.resolve)(workspace.projectDirectory, path);
+    const before = await readOptional(absolute);
+    changes.push({
+      path,
+      // Scaffold belongs to whoever implements the business logic: created
+      // when absent, kept untouched forever after, and never tracked for
+      // drift.
+      status: before === null ? "scaffold_create" : "scaffold_kept",
+      before_hash: before === null ? null : fingerprint(before),
+      after_hash: before === null ? fingerprint(content) : null
     });
   }
   for (const path of Object.keys(previous?.files ?? {}).filter((path2) => !(path2 in files)).sort()) {
@@ -24576,7 +25052,7 @@ async function checkLordWorkspace(projectPath, options = {}) {
       applicationApprovals.map((item) => item.approval.approval_id)
     ));
     const generation = await previewApplicationGeneration(workspace, workspace.application);
-    const drift = generation.changes.filter((item) => item.status !== "unchanged");
+    const drift = generation.changes.filter((item) => item.status !== "unchanged" && item.status !== "scaffold_kept" && item.status !== "scaffold_create");
     checks.push(check2(
       "generated_sources",
       drift.length === 0,
