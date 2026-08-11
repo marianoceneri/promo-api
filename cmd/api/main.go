@@ -19,11 +19,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	hadRows, err := store.DatabaseHasRows(db)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if err := store.MigrateDatabase(db); err != nil {
 		log.Fatal(err)
 	}
 	promotionStore := store.NewPromotionStore(db)
-	handler := httpapi.NewHandler(promotionStore)
+	handler := httpapi.NewHandlerWithHistory(!hadRows, promotionStore)
 	log.Printf("promo-api listening on 127.0.0.1:8080")
 	log.Fatal(http.ListenAndServe("127.0.0.1:8080", handler))
 }

@@ -13,11 +13,12 @@ type Event struct {
 }
 
 type Recorder struct {
-	mu     sync.RWMutex
-	events []Event
+	mu              sync.RWMutex
+	events          []Event
+	historyComplete bool
 }
 
-func NewRecorder() *Recorder { return &Recorder{} }
+func NewRecorder() *Recorder { return &Recorder{historyComplete: true} }
 
 func (r *Recorder) Record(eventType string, data map[string]any) {
 	r.mu.Lock()
@@ -31,4 +32,19 @@ func (r *Recorder) Snapshot() []Event {
 	result := make([]Event, len(r.events))
 	copy(result, r.events)
 	return result
+}
+
+// MarkHistoryIncomplete records that events happened before this process
+// started (persistent state predates the recorder); verifications must not
+// assume a complete history.
+func (r *Recorder) MarkHistoryIncomplete() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.historyComplete = false
+}
+
+func (r *Recorder) HistoryComplete() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.historyComplete
 }

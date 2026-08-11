@@ -45,6 +45,25 @@ func NewTestDatabase() *sql.DB {
 	return db
 }
 
+// DatabaseHasRows reports whether any contract-managed table already holds
+// data: a fresh process over pre-existing rows has an incomplete event
+// history and must declare it.
+func DatabaseHasRows(db *sql.DB) (bool, error) {
+	for _, table := range []string{"promotions"} {
+		var populated int64
+		if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM " + table + " LIMIT 1)").Scan(&populated); err != nil {
+			if strings.Contains(err.Error(), "no such table") {
+				continue
+			}
+			return false, err
+		}
+		if populated != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // MigrateDatabase creates missing tables and adds missing columns derived
 // from the active contract. Columns present in the database but absent from
 // the contract abort with an explicit error: destructive migrations require

@@ -21,14 +21,14 @@ type Handler struct {
 	events     *observability.Recorder
 }
 
-func NewHandler(promotions *store.PromotionStore) http.Handler {
+func newHandler(promotions *store.PromotionStore) (*Handler, http.Handler) {
 	handler := &Handler{promotions: promotions, events: observability.NewRecorder()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /_lord/events", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"history_complete": true, "final": true, "events": handler.events.Snapshot()})
+		writeJSON(w, http.StatusOK, map[string]any{"history_complete": handler.events.HistoryComplete(), "final": true, "events": handler.events.Snapshot()})
 	})
 	mux.HandleFunc("POST /v1/promotions", handler.createPromotion)
 	mux.HandleFunc("PUT /v1/promotions/{id}", handler.updatePromotion)
@@ -39,6 +39,22 @@ func NewHandler(promotions *store.PromotionStore) http.Handler {
 	mux.HandleFunc("GET /v1/promotions/{id}", handler.getPromotion)
 	mux.HandleFunc("GET /v1/promotions", handler.listPromotions)
 	mux.HandleFunc("GET /v1/promotions/{id}/validity", handler.checkPromotionValidity)
+	return handler, mux
+}
+
+func NewHandler(promotions *store.PromotionStore) http.Handler {
+	_, mux := newHandler(promotions)
+	return mux
+}
+
+// NewHandlerWithHistory reports whether the event history is complete: a
+// service starting over pre-existing persistent state must declare an
+// incomplete history so runtime verification stays honest.
+func NewHandlerWithHistory(historyComplete bool, promotions *store.PromotionStore) http.Handler {
+	handler, mux := newHandler(promotions)
+	if !historyComplete {
+		handler.events.MarkHistoryIncomplete()
+	}
 	return mux
 }
 
