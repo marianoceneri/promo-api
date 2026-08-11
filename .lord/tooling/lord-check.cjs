@@ -22580,7 +22580,11 @@ var applicationFieldSchema = external_exports.object({
   default: external_exports.union([external_exports.string(), external_exports.number(), external_exports.boolean()]).optional(),
   minimum: external_exports.number().int().optional(),
   maximum: external_exports.number().int().optional(),
-  enum: external_exports.array(external_exports.string().min(1)).min(1).optional()
+  enum: external_exports.array(external_exports.string().min(1)).min(1).optional(),
+  references: external_exports.object({
+    entity: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
+    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/)
+  }).strict().optional()
 }).strict();
 var applicationEntitySchema = external_exports.object({
   name: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
@@ -22592,10 +22596,12 @@ var applicationEntitySchema = external_exports.object({
 }).strict();
 var stateGuardSchema = external_exports.union([
   external_exports.object({
+    via: external_exports.string().regex(/^[a-z][a-z0-9_]*$/).optional(),
     field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
     equals: external_exports.union([external_exports.boolean(), external_exports.string().min(1)])
   }).strict(),
   external_exports.object({
+    via: external_exports.string().regex(/^[a-z][a-z0-9_]*$/).optional(),
     field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
     in: external_exports.array(external_exports.string().min(1)).min(1)
   }).strict()
@@ -22638,6 +22644,10 @@ var applicationOperationSchema = external_exports.object({
       external_exports.object({
         field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
         after: external_exports.literal("request_time")
+      }).strict(),
+      external_exports.object({
+        policy: external_exports.string().regex(/^[A-Z][A-Za-z0-9]*$/),
+        via: external_exports.string().regex(/^[a-z][a-z0-9_]*$/)
       }).strict()
     ])
   }).strict().optional()
@@ -22690,6 +22700,16 @@ var applicationContractSchema = external_exports.object({
       context.addIssue({ code: "custom", path: ["entities", entityIndex, "id_field"], message: "id_field must reference a required string field" });
     }
     entity.fields.forEach((field, fieldIndex) => {
+      if (field.references) {
+        const target = entities.get(field.references.entity);
+        if (!target) {
+          context.addIssue({ code: "custom", path: ["entities", entityIndex, "fields", fieldIndex, "references", "entity"], message: `references an unknown entity '${field.references.entity}'` });
+        } else if (field.references.field !== target.id_field) {
+          context.addIssue({ code: "custom", path: ["entities", entityIndex, "fields", fieldIndex, "references", "field"], message: `references must point at the identifier of ${target.name} ('${target.id_field}')` });
+        } else if (field.type !== "string") {
+          context.addIssue({ code: "custom", path: ["entities", entityIndex, "fields", fieldIndex], message: "reference fields must be strings, like the identifiers they point at" });
+        }
+      }
       if ((field.minimum !== void 0 || field.maximum !== void 0) && field.type !== "integer") {
         context.addIssue({ code: "custom", path: ["entities", entityIndex, "fields", fieldIndex], message: "minimum/maximum require an integer field" });
       }
@@ -22724,9 +22744,20 @@ var applicationContractSchema = external_exports.object({
     const expectedMethod = operation.kind === "create" || operation.kind === "transition" ? "POST" : operation.kind === "update" ? "PUT" : "GET";
     if (operation.method !== expectedMethod) context.addIssue({ code: "custom", path: ["operations", index, "method"], message: `${operation.kind} must use ${expectedMethod}` });
     const needsID = ["update", "get", "evaluate_validity", "transition"].includes(operation.kind);
-    if (needsID !== operation.path.includes("{id}")) context.addIssue({ code: "custom", path: ["operations", index, "path"], message: needsID ? "operation path must contain {id}" : "operation path must not contain {id}" });
-    const stateLiteralIssue = (fieldName, value) => {
-      const field = fieldDefinitions.get(fieldName);
+    const idTokens = entity ? [`{id}`, `{${entity.id_field}}`] : ["{id}"];
+    const hasIDToken = idTokens.some((token) => operation.path.includes(token));
+    if (needsID !== hasIDToken) context.addIssue({ code: "custom", path: ["operations", index, "path"], message: needsID ? `operation path must contain ${idTokens.join(" or ")}` : "operation path must not contain an identifier segment" });
+    const resolveGuardFields = (via) => {
+      if (!via) return { fields: fieldDefinitions, issue: null };
+      const viaField = fieldDefinitions.get(via);
+      if (!viaField) return { fields: null, issue: `via '${via}' is not a field of ${operation.entity}` };
+      if (!viaField.references) return { fields: null, issue: `via '${via}' must be a reference field (declare references on it)` };
+      const target = entities.get(viaField.references.entity);
+      if (!target) return { fields: null, issue: `via '${via}' points at an unknown entity` };
+      return { fields: new Map(target.fields.map((field) => [field.name, field])), issue: null };
+    };
+    const stateLiteralIssueIn = (fields2, fieldName, value) => {
+      const field = fields2.get(fieldName);
       if (!field) return "state fields must reference an entity field";
       if (field.type === "boolean") return typeof value === "boolean" ? null : "boolean state fields require boolean literals";
       if (field.type === "string" && field.enum) {
@@ -22734,6 +22765,7 @@ var applicationContractSchema = external_exports.object({
       }
       return "state fields must be boolean or enumerated string entity fields";
     };
+    const stateLiteralIssue = (fieldName, value) => stateLiteralIssueIn(fieldDefinitions, fieldName, value);
     if (operation.kind === "transition") {
       if (!operation.transition) context.addIssue({ code: "custom", path: ["operations", index, "transition"], message: "transition operation requires transition semantics" });
       else {
@@ -22753,12 +22785,17 @@ var applicationContractSchema = external_exports.object({
       ...(operation.state_guards ?? []).map((guard, guardIndex) => ({ guard, path: ["operations", index, "state_guards", guardIndex] }))
     ];
     allGuards.forEach(({ guard, path }) => {
-      if (!needsID) context.addIssue({ code: "custom", path, message: "state guards require an entity-instance operation" });
+      if (!needsID && !guard.via) context.addIssue({ code: "custom", path, message: "state guards without via require an entity-instance operation; guards on create must go via a reference field" });
+      const resolved = resolveGuardFields(guard.via);
+      if (resolved.issue || !resolved.fields) {
+        context.addIssue({ code: "custom", path: [...path, "via"], message: resolved.issue ?? "invalid via reference" });
+        return;
+      }
       if ("equals" in guard) {
-        const guardIssue = stateLiteralIssue(guard.field, guard.equals);
+        const guardIssue = stateLiteralIssueIn(resolved.fields, guard.field, guard.equals);
         if (guardIssue) context.addIssue({ code: "custom", path: [...path, "field"], message: guardIssue });
       } else {
-        const field = fieldDefinitions.get(guard.field);
+        const field = resolved.fields.get(guard.field);
         if (field?.type !== "string" || !field.enum) {
           context.addIssue({ code: "custom", path: [...path, "field"], message: "membership guards require an enumerated string entity field" });
         } else if (!guard.in.every((member) => field.enum.includes(member))) {
@@ -22775,7 +22812,22 @@ var applicationContractSchema = external_exports.object({
       const when = operation.precondition.when;
       const whenIssue = when ? stateLiteralIssue(when.field, when.equals) : null;
       if (whenIssue) context.addIssue({ code: "custom", path: ["operations", index, "precondition", "when", "field"], message: whenIssue });
-      if (entity?.fields.find((field) => field.name === operation.precondition?.requires.field)?.type !== "datetime") {
+      const requires = operation.precondition.requires;
+      if ("policy" in requires) {
+        const policy = contract.policies.find((item) => item.id === requires.policy);
+        const resolved = resolveGuardFields(requires.via);
+        if (!policy) {
+          context.addIssue({ code: "custom", path: ["operations", index, "precondition", "requires", "policy"], message: `precondition names an unknown policy '${requires.policy}'` });
+        }
+        if (resolved.issue || !resolved.fields) {
+          context.addIssue({ code: "custom", path: ["operations", index, "precondition", "requires", "via"], message: resolved.issue ?? "invalid via reference" });
+        } else if (policy) {
+          const viaField = fieldDefinitions.get(requires.via);
+          if (viaField?.references && policy.entity !== viaField.references.entity) {
+            context.addIssue({ code: "custom", path: ["operations", index, "precondition", "requires"], message: `policy ${policy.id} applies to ${policy.entity}, but via '${requires.via}' references ${viaField.references.entity}` });
+          }
+        }
+      } else if (entity?.fields.find((field) => field.name === requires.field)?.type !== "datetime") {
         context.addIssue({ code: "custom", path: ["operations", index, "precondition", "requires", "field"], message: "precondition requires.field must reference a datetime entity field" });
       }
       if (operation.kind === "transition" && when && operation.transition && when.field === operation.transition.field && when.equals !== operation.transition.to) {
@@ -22942,38 +22994,47 @@ function generateGoRestApplication(contract) {
   };
 }
 function renderHandlerTests(contract) {
-  const stores = contract.entities.map((entity) => entity.storage === "sqlite" ? `store.New${entity.name}Store(store.NewTestDatabase())` : `store.New${entity.name}Store()`).join(", ");
+  const sqliteEntities = contract.entities.filter((entity) => entity.storage === "sqlite");
+  const storeArgs = contract.entities.map((entity) => entity.storage === "sqlite" ? `store.New${entity.name}Store(db)` : `store.New${entity.name}Store()`).join(", ");
+  const stores = sqliteEntities.length > 0 ? "newTestHandler()" : `NewHandler(${contract.entities.map((entity) => `store.New${entity.name}Store()`).join(", ")})`;
+  const testHelper = sqliteEntities.length > 0 ? `
+func newTestHandler() http.Handler {
+	db := store.NewTestDatabase()
+	return NewHandler(${storeArgs})
+}
+` : "";
   const tests = contract.entities.flatMap((entity) => {
     const create = contract.operations.find((item) => item.entity === entity.name && item.kind === "create");
     const get = contract.operations.find((item) => item.entity === entity.name && item.kind === "get");
     const validity = contract.operations.find((item) => item.entity === entity.name && item.kind === "evaluate_validity");
     const transitions = contract.operations.filter((item) => item.entity === entity.name && item.kind === "transition");
     if (!create) return [];
-    const sample = Object.fromEntries(entity.fields.map((field) => [field.name, sampleValue(field)]));
+    const sample = entitySample(contract, entity);
     const idValue = String(sample[entity.id_field]);
     const steps = [
+      ...referencedSetupSteps(contract, entity),
       `	request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(sample))})))`,
       "	response := httptest.NewRecorder()",
       "	handler.ServeHTTP(response, request)",
       '	if response.Code != http.StatusCreated { t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String()) }'
     ];
     if (create.emits) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(create.emits)} { t.Fatal("create did not emit its contractual event") }`);
-    const guardBlocks = (operation) => operation !== void 0 && operationGuards(operation).some((guard) => guardBlocksValue(guard, sample[guard.field]));
+    const guardBlocks = (operation) => operation !== void 0 && operationGuards(operation).some((guard) => !guard.via && guardBlocksValue(guard, sample[guard.field]));
     if (get) steps.push(
-      `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(get.path.replace("{id}", idValue))}, nil)`,
+      `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(pathWithID(get, entity, idValue))}, nil)`,
       "	response = httptest.NewRecorder()",
       "	handler.ServeHTTP(response, request)",
       guardBlocks(get) ? '	if response.Code != http.StatusConflict { t.Fatalf("guarded get status = %d, want 409, body = %s", response.Code, response.Body.String()) }' : '	if response.Code != http.StatusOK { t.Fatalf("get status = %d, body = %s", response.Code, response.Body.String()) }'
     );
     if (get?.emits && !guardBlocks(get)) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(get.emits)} { t.Fatal("get did not emit its contractual event") }`);
     if (validity && guardBlocks(validity)) steps.push(
-      `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${validity.path.replace("{id}", idValue)}?at=2030-06-01T00%3A00%3A00Z`)}, nil)`,
+      `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${pathWithID(validity, entity, idValue)}?at=2030-06-01T00%3A00%3A00Z`)}, nil)`,
       "	response = httptest.NewRecorder()",
       "	handler.ServeHTTP(response, request)",
       '	if response.Code != http.StatusConflict { t.Fatalf("guarded validity status = %d, want 409, body = %s", response.Code, response.Body.String()) }'
     );
     if (validity && !guardBlocks(validity)) steps.push(
-      `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${validity.path.replace("{id}", idValue)}?at=2030-06-01T00%3A00%3A00Z`)}, nil)`,
+      `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${pathWithID(validity, entity, idValue)}?at=2030-06-01T00%3A00%3A00Z`)}, nil)`,
       "	response = httptest.NewRecorder()",
       "	handler.ServeHTTP(response, request)",
       '	if response.Code != http.StatusOK { t.Fatalf("validity status = %d, body = %s", response.Code, response.Body.String()) }',
@@ -22985,9 +23046,9 @@ function renderHandlerTests(contract) {
     const simulated = { ...sample };
     for (const transition of transitions) {
       const semantics = transition.transition;
-      const blocked = semantics.from !== void 0 && simulated[semantics.field] !== semantics.from || operationGuards(transition).some((guard) => guardBlocksValue(guard, simulated[guard.field]));
+      const blocked = semantics.from !== void 0 && simulated[semantics.field] !== semantics.from || operationGuards(transition).some((guard) => !guard.via && guardBlocksValue(guard, simulated[guard.field]));
       steps.push(
-        `	request = httptest.NewRequest(http.MethodPost, ${JSON.stringify(transition.path.replace("{id}", idValue))}, nil)`,
+        `	request = httptest.NewRequest(http.MethodPost, ${JSON.stringify(pathWithID(transition, entity, idValue))}, nil)`,
         "	response = httptest.NewRecorder()",
         "	handler.ServeHTTP(response, request)",
         blocked ? `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`blocked ${transition.id} status = %d, want 409, body = %s`)}, response.Code, response.Body.String()) }` : `	if response.Code != http.StatusOK { t.Fatalf(${JSON.stringify(`${transition.id} status = %d, body = %s`)}, response.Code, response.Body.String()) }`
@@ -22995,26 +23056,26 @@ function renderHandlerTests(contract) {
       if (blocked) continue;
       simulated[semantics.field] = semantics.to;
       if (transition.emits) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(transition.emits)} { t.Fatal(${JSON.stringify(`${transition.id} did not emit its contractual event`)}) }`);
-      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "update" && operationGuards(operation).some((guard) => guard.field === transition.transition?.field && guardBlocksValue(guard, transition.transition?.to)))) {
+      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "update" && operationGuards(operation).some((guard) => !guard.via && guard.field === transition.transition?.field && guardBlocksValue(guard, transition.transition?.to)))) {
         steps.push(
-          `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(guarded.path.replace("{id}", idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(sample))})))`,
+          `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(pathWithID(guarded, entity, idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(sample))})))`,
           "	response = httptest.NewRecorder()",
           "	handler.ServeHTTP(response, request)",
           `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`${guarded.id} after ${transition.id} status = %d, want 409`)}, response.Code) }`
         );
       }
-      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "evaluate_validity" && operationGuards(operation).some((guard) => guard.field === transition.transition?.field && guardBlocksValue(guard, transition.transition?.to)))) {
+      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "evaluate_validity" && operationGuards(operation).some((guard) => !guard.via && guard.field === transition.transition?.field && guardBlocksValue(guard, transition.transition?.to)))) {
         const instant = guarded.parameters.find((parameter) => parameter.type === "datetime" && parameter.required);
         steps.push(
-          `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${guarded.path.replace("{id}", idValue)}?${instant.name}=2030-06-01T00%3A00%3A00Z`)}, nil)`,
+          `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${pathWithID(guarded, entity, idValue)}?${instant.name}=2030-06-01T00%3A00%3A00Z`)}, nil)`,
           "	response = httptest.NewRecorder()",
           "	handler.ServeHTTP(response, request)",
           `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`${guarded.id} after ${transition.id} status = %d, want 409`)}, response.Code) }`
         );
       }
-      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "get" && operationGuards(operation).some((guard) => guard.field === transition.transition?.field && guardBlocksValue(guard, transition.transition?.to)))) {
+      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "get" && operationGuards(operation).some((guard) => !guard.via && guard.field === transition.transition?.field && guardBlocksValue(guard, transition.transition?.to)))) {
         steps.push(
-          `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(guarded.path.replace("{id}", idValue))}, nil)`,
+          `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(pathWithID(guarded, entity, idValue))}, nil)`,
           "	response = httptest.NewRecorder()",
           "	handler.ServeHTTP(response, request)",
           `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`${guarded.id} after ${transition.id} status = %d, want 409`)}, response.Code) }`
@@ -23046,21 +23107,25 @@ function renderHandlerTests(contract) {
     );
     if (Object.keys(create.correlation).length > 0) {
       const key = Object.keys(create.correlation)[0];
-      steps.push(`	if events.Events[0].Data[${JSON.stringify(key)}] != ${JSON.stringify(idValue)} { t.Fatalf("missing runtime correlation: %#v", events.Events[0].Data) }`);
+      steps.push(
+        "	correlated := false",
+        `	for _, event := range events.Events { if event.Type == ${JSON.stringify(create.emits ?? "")} && event.Data[${JSON.stringify(key)}] == ${JSON.stringify(idValue)} { correlated = true } }`,
+        `	if !correlated { t.Fatalf("missing runtime correlation for ${create.emits ?? "create"}: %#v", events.Events) }`
+      );
     }
     const blocks = [`func Test${entity.name}ContractFlow(t *testing.T) {
-	handler := NewHandler(${stores})
+	handler := ${stores}
 ${steps.join("\n")}
 }`];
     for (const field of entity.fields) {
       if (field.type === "integer" && (field.minimum !== void 0 || field.maximum !== void 0)) {
-        blocks.push(renderIntegerBoundaryTest(entity, create, field, stores));
+        blocks.push(renderIntegerBoundaryTest(contract, entity, create, field, stores));
       }
       const update = contract.operations.find((operation) => operation.entity === entity.name && operation.kind === "update");
-      if (update && field.immutable && field.name !== entity.id_field) blocks.push(renderImmutableFieldTest(entity, create, update, field, stores));
+      if (update && field.immutable && field.name !== entity.id_field) blocks.push(renderImmutableFieldTest(contract, entity, create, update, field, stores));
     }
     for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.precondition)) {
-      const block = renderPreconditionTest(entity, create, guarded, stores);
+      const block = renderPreconditionTest(contract, entity, create, guarded, stores);
       if (block) blocks.push(block);
     }
     return blocks;
@@ -23078,10 +23143,11 @@ import (
 
 	"${contract.target.module}/internal/store"
 )
-
+${testHelper}
 ${tests}
 `;
 }
+var CURRENT_START = "2000-01-01T00:00:00Z";
 var EXPIRED_START = "2000-01-01T00:00:00Z";
 var EXPIRED_END = "2000-02-01T00:00:00Z";
 var FUTURE_END = "2999-01-01T00:00:00Z";
@@ -23090,9 +23156,10 @@ function flippedStateValue(entity, fieldName, value) {
   const field = entity.fields.find((item) => item.name === fieldName);
   return field?.enum?.find((member) => member !== value) ?? `${value}-other`;
 }
-function preconditionBody(entity, operation, variant, idValue) {
+function preconditionBody(contract, entity, operation, variant, idValue) {
   const precondition = operation.precondition;
-  const body = Object.fromEntries(entity.fields.map((field) => [field.name, sampleValue(field)]));
+  if ("policy" in precondition.requires) throw new Error("policy preconditions do not derive same-entity boundary bodies");
+  const body = entitySample(contract, entity);
   body[entity.id_field] = idValue;
   body[precondition.requires.field] = variant === "future_matched" ? FUTURE_END : EXPIRED_END;
   if (variant !== "future_matched" && precondition.requires.field === "ends_at" && "starts_at" in body) body["starts_at"] = EXPIRED_START;
@@ -23101,15 +23168,17 @@ function preconditionBody(entity, operation, variant, idValue) {
   }
   return body;
 }
-function renderPreconditionTest(entity, create, operation, stores) {
+function renderPreconditionTest(contract, entity, create, operation, stores) {
   const testName = `Test${entity.name}${operation.id}Precondition`;
+  if ("policy" in operation.precondition.requires) return null;
   if (operation.kind === "create") {
     const cases = [
-      { name: "expired_blocked", body: preconditionBody(entity, operation, "expired_matched", `${entity.name.toUpperCase()}-PRE-EXPIRED`), want: "http.StatusConflict" },
-      { name: "future_allowed", body: preconditionBody(entity, operation, "future_matched", `${entity.name.toUpperCase()}-PRE-FUTURE`), want: "http.StatusCreated" },
-      ...operation.precondition.when ? [{ name: "expired_unguarded_allowed", body: preconditionBody(entity, operation, "expired_unmatched", `${entity.name.toUpperCase()}-PRE-UNGUARDED`), want: "http.StatusCreated" }] : []
+      { name: "expired_blocked", body: preconditionBody(contract, entity, operation, "expired_matched", `${entity.name.toUpperCase()}-PRE-EXPIRED`), want: "http.StatusConflict" },
+      { name: "future_allowed", body: preconditionBody(contract, entity, operation, "future_matched", `${entity.name.toUpperCase()}-PRE-FUTURE`), want: "http.StatusCreated" },
+      ...operation.precondition.when ? [{ name: "expired_unguarded_allowed", body: preconditionBody(contract, entity, operation, "expired_unmatched", `${entity.name.toUpperCase()}-PRE-UNGUARDED`), want: "http.StatusCreated" }] : []
     ];
     const rows = cases.map((item) => `		{name: ${JSON.stringify(item.name)}, body: ${JSON.stringify(JSON.stringify(item.body))}, want: ${item.want}},`).join("\n");
+    const setup = referencedSetupSteps(contract, entity).map((step) => step.split("\n").map((line) => `		${line.slice(1)}`).join("\n")).join("\n");
     return `func ${testName}(t *testing.T) {
 	cases := []struct {
 		name string
@@ -23120,7 +23189,8 @@ ${rows}
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			handler := NewHandler(${stores})
+			handler := ${stores}${setup ? `
+${setup}` : ""}
 			request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(operation.path)}, bytes.NewReader([]byte(test.body)))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -23131,34 +23201,34 @@ ${rows}
   }
   if (operation.kind === "update") {
     const idValue = `${entity.name.toUpperCase()}-PRE-UPDATE`;
-    const baseline = preconditionBody(entity, operation, "future_matched", idValue);
-    const expired = preconditionBody(entity, operation, "expired_matched", idValue);
+    const baseline = preconditionBody(contract, entity, operation, "future_matched", idValue);
+    const expired = preconditionBody(contract, entity, operation, "expired_matched", idValue);
     const whenIsMutable = operation.precondition.when && !entity.fields.find((field) => field.name === operation.precondition.when.field)?.immutable;
-    const unguarded = whenIsMutable ? preconditionBody(entity, operation, "expired_unmatched", idValue) : null;
+    const unguarded = whenIsMutable ? preconditionBody(contract, entity, operation, "expired_unmatched", idValue) : null;
     const steps = [
       `	request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(baseline))})))`,
       "	response := httptest.NewRecorder()",
       "	handler.ServeHTTP(response, request)",
       '	if response.Code != http.StatusCreated { t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String()) }',
-      `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(operation.path.replace("{id}", idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(expired))})))`,
+      `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(pathWithID(operation, entity, idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(expired))})))`,
       "	response = httptest.NewRecorder()",
       "	handler.ServeHTTP(response, request)",
       '	if response.Code != http.StatusConflict { t.Fatalf("expired update status = %d, want 409, body = %s", response.Code, response.Body.String()) }'
     ];
     if (unguarded) steps.push(
-      `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(operation.path.replace("{id}", idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(unguarded))})))`,
+      `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(pathWithID(operation, entity, idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(unguarded))})))`,
       "	response = httptest.NewRecorder()",
       "	handler.ServeHTTP(response, request)",
       '	if response.Code != http.StatusOK { t.Fatalf("unguarded expired update status = %d, want 200, body = %s", response.Code, response.Body.String()) }'
     );
     return `func ${testName}(t *testing.T) {
-	handler := NewHandler(${stores})
-${steps.join("\n")}
+	handler := ${stores}
+${[...referencedSetupSteps(contract, entity), ...steps].join("\n")}
 }`;
   }
   if (operation.kind === "transition" && operation.transition) {
     const idValue = `${entity.name.toUpperCase()}-PRE-TRANSITION`;
-    const setup = preconditionBody(entity, operation, "expired_matched", idValue);
+    const setup = preconditionBody(contract, entity, operation, "expired_matched", idValue);
     setup[operation.transition.field] = operation.transition.from ?? !operation.transition.to;
     const createGuard = create.precondition;
     if (createGuard) {
@@ -23166,12 +23236,12 @@ ${steps.join("\n")}
       if (setup[createGuard.when.field] === createGuard.when.equals) return null;
     }
     return `func ${testName}(t *testing.T) {
-	handler := NewHandler(${stores})
+	handler := ${stores}
 	request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(setup))})))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated { t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String()) }
-	request = httptest.NewRequest(http.MethodPost, ${JSON.stringify(operation.path.replace("{id}", idValue))}, nil)
+	request = httptest.NewRequest(http.MethodPost, ${JSON.stringify(pathWithID(operation, entity, idValue))}, nil)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict { t.Fatalf("expired transition status = %d, want 409, body = %s", response.Code, response.Body.String()) }
@@ -23179,24 +23249,26 @@ ${steps.join("\n")}
   }
   return null;
 }
-function renderImmutableFieldTest(entity, create, update, field, stores) {
-  const original = Object.fromEntries(entity.fields.map((item) => [item.name, sampleValue(item)]));
+function renderImmutableFieldTest(contract, entity, create, update, field, stores) {
+  const original = entitySample(contract, entity);
   const idValue = String(original[entity.id_field]);
   const changed = { ...original, [field.name]: changedSampleValue(field, original[field.name]) };
+  const setup = referencedSetupSteps(contract, entity);
   return `func Test${entity.name}${goName(field.name)}IsImmutable(t *testing.T) {
-	handler := NewHandler(${stores})
+	handler := ${stores}${setup.length ? `
+${setup.join("\n")}` : ""}
 	request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(original))})))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated { t.Fatalf("create status = %d", response.Code) }
-	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(update.path.replace("{id}", idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(changed))})))
+	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(pathWithID(update, entity, idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(changed))})))
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict { t.Fatalf("immutable update status = %d, want 409", response.Code) }
 }`;
 }
-function renderIntegerBoundaryTest(entity, create, field, stores) {
-  const base = Object.fromEntries(entity.fields.map((item) => [item.name, sampleValue(item)]));
+function renderIntegerBoundaryTest(contract, entity, create, field, stores) {
+  const base = entitySample(contract, entity);
   const cases = [];
   if (field.minimum !== void 0) cases.push(
     { name: "minimum", value: field.minimum, status: "http.StatusCreated" },
@@ -23210,6 +23282,7 @@ function renderIntegerBoundaryTest(entity, create, field, stores) {
     const body = { ...base, [entity.id_field]: `${entity.name.toUpperCase()}-${goName(field.name).toUpperCase()}-${item.name}`, [field.name]: item.value };
     return `		{name: ${JSON.stringify(item.name)}, body: ${JSON.stringify(JSON.stringify(body))}, want: ${item.status}},`;
   }).join("\n");
+  const setup = referencedSetupSteps(contract, entity).map((step) => step.split("\n").map((line) => `		${line.slice(1)}`).join("\n")).join("\n");
   return `func Test${entity.name}${goName(field.name)}ContractBoundaries(t *testing.T) {
 	cases := []struct {
 		name string
@@ -23220,7 +23293,8 @@ ${rows}
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			handler := NewHandler(${stores})
+			handler := ${stores}${setup ? `
+${setup}` : ""}
 			request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(test.body)))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -23228,6 +23302,73 @@ ${rows}
 		})
 	}
 }`;
+}
+function entitySample(contract, entity) {
+  return Object.fromEntries(entity.fields.map((field) => {
+    if (field.references) {
+      const target = contract.entities.find((item) => item.name === field.references.entity);
+      const targetID = target?.fields.find((item) => item.name === target.id_field);
+      return [field.name, targetID ? sampleValue(targetID) : `${field.name}-test`];
+    }
+    return [field.name, sampleValue(field)];
+  }));
+}
+function referencedSetupSteps(contract, entity) {
+  const steps = [];
+  const created = /* @__PURE__ */ new Set();
+  for (const field of entity.fields) {
+    if (!field.references || created.has(field.references.entity)) continue;
+    created.add(field.references.entity);
+    const target = contract.entities.find((item) => item.name === field.references.entity);
+    const create = target && contract.operations.find((item) => item.entity === target.name && item.kind === "create");
+    if (!target || !create) continue;
+    const body = entitySample(contract, target);
+    for (const operation of contract.operations.filter((item) => item.entity === entity.name)) {
+      const requires = operation.precondition?.requires;
+      if (!requires || !("policy" in requires) || requires.via !== field.name) continue;
+      const policy = contract.policies.find((item) => item.id === requires.policy);
+      if (!policy) continue;
+      body[policy.start_field] = CURRENT_START;
+      body[policy.end_field] = FUTURE_END;
+    }
+    const targetID = String(body[target.id_field]);
+    steps.push(
+      `	{
+		setup := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(body))})))
+		setupResponse := httptest.NewRecorder()
+		handler.ServeHTTP(setupResponse, setup)
+		if setupResponse.Code != http.StatusCreated { t.Fatalf(${JSON.stringify(`referenced ${target.name} setup status = %d, body = %s`)}, setupResponse.Code, setupResponse.Body.String()) }
+	}`
+    );
+    const required2 = /* @__PURE__ */ new Map();
+    for (const operation of contract.operations.filter((item) => item.entity === entity.name)) {
+      for (const guard of operationGuards(operation)) {
+        if (guard.via === field.name && "equals" in guard) required2.set(guard.field, guard.equals);
+      }
+    }
+    const state = { ...body };
+    for (const [stateField, wanted] of required2) {
+      if (state[stateField] === wanted) continue;
+      const path = [];
+      for (let hop = 0; hop < target.fields.length + 2 && state[stateField] !== wanted; hop += 1) {
+        const next = contract.operations.find((item) => item.entity === target.name && item.kind === "transition" && item.transition?.field === stateField && (item.transition.from === void 0 || item.transition.from === state[stateField]));
+        if (!next?.transition) break;
+        path.push(next);
+        state[stateField] = next.transition.to;
+      }
+      for (const transition of path) {
+        steps.push(
+          `	{
+		setup := httptest.NewRequest(http.MethodPost, ${JSON.stringify(pathWithID(transition, target, targetID))}, nil)
+		setupResponse := httptest.NewRecorder()
+		handler.ServeHTTP(setupResponse, setup)
+		if setupResponse.Code != http.StatusOK { t.Fatalf(${JSON.stringify(`referenced ${target.name} ${transition.id} setup status = %d, body = %s`)}, setupResponse.Code, setupResponse.Body.String()) }
+	}`
+        );
+      }
+    }
+  }
+  return steps;
 }
 function sampleValue(field) {
   if (field.name === "id") return "PROMO-TEST";
@@ -23439,6 +23580,8 @@ func (s *${store}) List() []domain.${entity.name} {
   const body = blocks.length > 0 ? `
 
 ${blocks}` : "";
+  const referenceError = contract.entities.some((entity) => entity.fields.some((field) => field.references)) ? `
+	ErrInvalidReference = errors.New("referenced entity does not exist")` : "";
   return `// Code generated by LORD. DO NOT EDIT.
 package store
 
@@ -23446,7 +23589,7 @@ ${imports}
 
 var (
 	ErrNotFound = errors.New("not found")
-	ErrAlreadyExists = errors.New("already exists")
+	ErrAlreadyExists = errors.New("already exists")${referenceError}
 )${body}
 `;
 }
@@ -23459,18 +23602,30 @@ function sqlColumnDefault(type) {
   return type === "integer" || type === "boolean" ? "0" : "''";
 }
 function renderSqliteStores(contract) {
-  const entities = contract.entities.filter((entity) => entity.storage === "sqlite");
+  const unsorted = contract.entities.filter((entity) => entity.storage === "sqlite");
+  const entities = [...unsorted].sort((left, right) => {
+    const leftRefs = left.fields.some((field) => field.references?.entity === right.name);
+    const rightRefs = right.fields.some((field) => field.references?.entity === left.name);
+    if (leftRefs && !rightRefs) return 1;
+    if (rightRefs && !leftRefs) return -1;
+    return 0;
+  });
   const usesTime = entities.some((entity) => entity.fields.some((field) => field.type === "datetime"));
   const migrations = entities.map((entity) => {
     const table = entity.plural.replace(/-/g, "_");
+    const foreignKeys = entity.fields.filter((field) => field.references && contract.entities.find((item) => item.name === field.references.entity)?.storage === "sqlite").map((field) => {
+      const target = contract.entities.find((item) => item.name === field.references.entity);
+      return `, FOREIGN KEY (${field.name}) REFERENCES ${target.plural.replace(/-/g, "_")}(${target.id_field})`;
+    }).join("");
     const columns = entity.fields.map((field) => {
       const constraint = field.name === entity.id_field ? " PRIMARY KEY" : "";
       return `${field.name} ${sqlColumnType(field.type)} NOT NULL${constraint}`;
-    }).join(", ");
+    }).join(", ") + foreignKeys;
     const expected = entity.fields.map(
       (field) => `		{${JSON.stringify(field.name)}, ${JSON.stringify(`${sqlColumnType(field.type)} NOT NULL DEFAULT ${sqlColumnDefault(field.type)}`)}},`
     ).join("\n");
-    return `	if _, err := db.Exec(${JSON.stringify(`CREATE TABLE IF NOT EXISTS ${table} (${columns})`)}); err != nil {
+    return `	{
+	if _, err := db.Exec(${JSON.stringify(`CREATE TABLE IF NOT EXISTS ${table} (${columns})`)}); err != nil {
 		return err
 	}
 	existing, err := tableColumns(db, ${JSON.stringify(table)})
@@ -23493,10 +23648,15 @@ ${expected}
 		if !known[name] {
 			return fmt.Errorf("table ${table} has column %q outside the active contract; destructive migrations require explicit operator action", name)
 		}
+	}
 	}`;
   }).join("\n\n");
   const stores = entities.map((entity) => {
     const table = entity.plural.replace(/-/g, "_");
+    const foreignKeyMapping = contract.entities.some((item) => item.fields.some((field) => field.references)) ? `
+		if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+			return ErrInvalidReference
+		}` : "";
     const store = `${entity.name}Store`;
     const id = goName(entity.id_field);
     const columnNames = entity.fields.map((field) => field.name).join(", ");
@@ -23535,7 +23695,7 @@ func (s *${store}) Create(value domain.${entity.name}) error {
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return ErrAlreadyExists
-		}
+		}${foreignKeyMapping}
 		return err
 	}
 	return nil
@@ -23644,7 +23804,7 @@ func OpenDatabase(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;"); err != nil {
+	if _, err := db.Exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;"); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -23657,6 +23817,9 @@ func NewTestDatabase() *sql.DB {
 		panic(err)
 	}
 	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		panic(err)
+	}
 	if err := MigrateDatabase(db); err != nil {
 		panic(err)
 	}
@@ -23799,23 +23962,26 @@ function renderOperation(contract, operation) {
   const functionName = lowerFirst(operation.id);
   const id = goName(entity.id_field);
   const emit = renderEmit(operation, operation.kind === "list" ? null : "value");
-  if (operation.kind === "update") return renderGovernedUpdateOperation(operation, entity, receiver, functionName, id, emit);
-  if (operation.kind === "get") return renderGetOperation(operation, entity, receiver, functionName, emit);
+  if (operation.kind === "update") return renderGovernedUpdateOperation(contract, operation, entity, receiver, functionName, id, emit);
+  if (operation.kind === "get") return renderGetOperation(contract, operation, entity, receiver, functionName, emit);
   if (operation.kind === "list") return renderListOperation(operation, entity, receiver, functionName, emit);
   if (operation.kind === "evaluate_validity") return renderValidityOperation(contract, operation, entity, receiver, functionName, id, emit);
   switch (operation.kind) {
-    case "create":
+    case "create": {
+      const referenceCreateMapping = entity.fields.some((field) => field.references) ? `
+		if errors.Is(err, store.ErrInvalidReference) { writeError(w, http.StatusConflict, "a referenced entity does not exist"); return }` : "";
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	var value domain.${entity.name}
 	if err := decodeJSON(r, &value); err != nil { writeError(w, http.StatusBadRequest, "invalid JSON body"); return }
 	apply${entity.name}Defaults(&value)
-	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }${renderPrecondition(operation, "value")}
+	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }${renderReferenceChecks(contract, entity, "value")}${renderGuardChecks(contract, entity, operation, "value")}${renderPrecondition(contract, entity, operation, "value")}
 	if err := ${receiver}.Create(value); err != nil {
-		if errors.Is(err, store.ErrAlreadyExists) { writeError(w, http.StatusConflict, "${entity.id_field} already exists"); return }
+		if errors.Is(err, store.ErrAlreadyExists) { writeError(w, http.StatusConflict, "${entity.id_field} already exists"); return }${referenceCreateMapping}
 		writeError(w, http.StatusInternalServerError, "could not create ${lowerFirst(entity.name)}"); return
 	}${emit}
 	writeJSON(w, http.StatusCreated, value)
 }`;
+    }
     case "update":
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	var value domain.${entity.name}
@@ -23844,9 +24010,9 @@ function renderOperation(contract, operation) {
       const expected = operation.transition.from === void 0 ? "" : `
 	if value.${field} != ${goLiteral(operation.transition.from)} { writeError(w, http.StatusConflict, "transition requires ${operation.transition.field}=${String(operation.transition.from)}"); return }`;
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
-	value, err := ${receiver}.Get(r.PathValue("id"))
-	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${renderLoadedStateGuard(operation, "value")}${expected}
-	value.${field} = ${goLiteral(operation.transition.to)}${renderPrecondition(operation, "value")}
+	value, err := ${receiver}.Get(r.PathValue("${pathIDToken(operation, entity)}"))
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${renderGuardChecks(contract, entity, operation, "value")}${expected}
+	value.${field} = ${goLiteral(operation.transition.to)}${renderPrecondition(contract, entity, operation, "value")}
 	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not transition ${lowerFirst(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
@@ -23870,9 +24036,8 @@ function renderOperation(contract, operation) {
     }
   }
 }
-function renderGovernedUpdateOperation(operation, entity, receiver, functionName, id, emit) {
-  const guards = operationGuards(operation).map((item) => `
-	if ${guardFailureExpr(item, "current")} { writeError(w, http.StatusConflict, "${guardMessage(item)}"); return }`).join("");
+function renderGovernedUpdateOperation(contract, operation, entity, receiver, functionName, id, emit) {
+  const guards = renderGuardChecks(contract, operation.entity === entity.name ? entity : entity, operation, "current");
   const guard = guards || "\n	_ = current";
   const immutableChecks = entity.fields.filter((field) => field.immutable && field.name !== entity.id_field).map((field) => {
     const name = goName(field.name);
@@ -23885,23 +24050,23 @@ function renderGovernedUpdateOperation(operation, entity, receiver, functionName
 	if ${changed} { writeError(w, http.StatusConflict, "${field.name} is immutable"); return }`;
   }).join("");
   return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
-	current, err := ${receiver}.Get(r.PathValue("id"))
+	current, err := ${receiver}.Get(r.PathValue("${pathIDToken(operation, entity)}"))
 	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${guard}
 	var value domain.${entity.name}
 	if err := decodeJSON(r, &value); err != nil { writeError(w, http.StatusBadRequest, "invalid JSON body"); return }
-	id := r.PathValue("id")
+	id := r.PathValue("${pathIDToken(operation, entity)}")
 	if value.${id} == "" { value.${id} = id }
 	if value.${id} != id { writeError(w, http.StatusBadRequest, "immutable ${entity.id_field} does not match path"); return }${immutableChecks}
 	apply${entity.name}Defaults(&value)
-	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }${renderPrecondition(operation, "value")}
+	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }${renderReferenceChecks(contract, entity, "value")}${renderPrecondition(contract, entity, operation, "value")}
 	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not update ${lowerFirst(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
 }
-function renderGetOperation(operation, entity, receiver, functionName, emit) {
-  const guard = renderLoadedStateGuard(operation, "value");
+function renderGetOperation(contract, operation, entity, receiver, functionName, emit) {
+  const guard = renderGuardChecks(contract, entity, operation, "value");
   return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
-	value, err := ${receiver}.Get(r.PathValue("id"))
+	value, err := ${receiver}.Get(r.PathValue("${pathIDToken(operation, entity)}"))
 	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${guard}${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
@@ -23941,9 +24106,9 @@ function renderValidityOperation(contract, operation, entity, receiver, function
   const instant = operation.parameters.find((parameter) => parameter.in === "query" && parameter.type === "datetime" && parameter.required);
   if (!instant) throw new Error(`Operation '${operation.id}' requires one datetime query parameter.`);
   const enabled = policy.enabled_field ? ` && value.${goName(policy.enabled_field)}` : "";
-  const guard = renderLoadedStateGuard(operation, "value");
+  const guard = renderGuardChecks(contract, entity, operation, "value");
   return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
-	value, err := ${receiver}.Get(r.PathValue("id"))
+	value, err := ${receiver}.Get(r.PathValue("${pathIDToken(operation, entity)}"))
 	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${guard}
 	evaluatedAt, err := time.Parse(time.RFC3339, r.URL.Query().Get("${instant.name}"))
 	if err != nil { writeError(w, http.StatusBadRequest, "${instant.name} must be an RFC3339 timestamp"); return }
@@ -23951,21 +24116,49 @@ function renderValidityOperation(contract, operation, entity, receiver, function
 	writeJSON(w, http.StatusOK, map[string]any{"id": value.${id}, "valid": valid, "${instant.name}": evaluatedAt, "characteristics": value})
 }`;
 }
-function renderPrecondition(operation, valueVariable) {
+function pathIDToken(operation, entity) {
+  return operation.path.includes(`{${entity.id_field}}`) ? entity.id_field : "id";
+}
+function pathWithID(operation, entity, idValue) {
+  return operation.path.replace(`{${pathIDToken(operation, entity)}}`, idValue);
+}
+function referencedEntityFor(contract, entity, via) {
+  const viaField = entity.fields.find((field) => field.name === via);
+  const target = viaField?.references && contract.entities.find((item) => item.name === viaField.references.entity);
+  if (!target) throw new Error(`Field '${via}' of ${entity.name} is not a valid reference.`);
+  return target;
+}
+function renderPrecondition(contract, entity, operation, valueVariable) {
   const precondition = operation.precondition;
   if (!precondition) return "";
-  const requires = goName(precondition.requires.field);
-  const failure = "after" in precondition.requires ? `!${valueVariable}.${requires}.After(time.Now().UTC())` : `${valueVariable}.${requires}.Before(time.Now().UTC())`;
-  const check3 = `if ${failure} { writeError(w, http.StatusConflict, "${preconditionMessage(operation)}"); return }`;
+  const requires = precondition.requires;
+  let check3;
+  if ("policy" in requires) {
+    const policy = contract.policies.find((item) => item.id === requires.policy);
+    if (!policy) throw new Error(`Operation '${operation.id}' names unknown policy '${requires.policy}'.`);
+    const target = referencedEntityFor(contract, entity, requires.via);
+    const variable = `policyVia${goName(requires.via)}`;
+    const enabled = policy.enabled_field ? ` || !${variable}.${goName(policy.enabled_field)}` : "";
+    const message = `${operation.id} requires the ${lowerFirst(target.name)} referenced by ${requires.via} to satisfy ${policy.id}`;
+    check3 = `${variable}, err := h.${lowerFirst(target.name)}s.Get(${valueVariable}.${goName(requires.via)})
+	if err != nil { writeError(w, http.StatusConflict, "${requires.via} references a ${lowerFirst(target.name)} that does not exist"); return }
+	now := time.Now().UTC()
+	if now.Before(${variable}.${goName(policy.start_field)}) || !now.Before(${variable}.${goName(policy.end_field)})${enabled} { writeError(w, http.StatusConflict, "${message}"); return }`;
+  } else {
+    const requiresName = goName(requires.field);
+    const failure = "after" in requires ? `!${valueVariable}.${requiresName}.After(time.Now().UTC())` : `${valueVariable}.${requiresName}.Before(time.Now().UTC())`;
+    check3 = `if ${failure} { writeError(w, http.StatusConflict, "${preconditionMessage(operation)}"); return }`;
+  }
   if (!precondition.when) return `
 	${check3}`;
   return `
 	if ${valueVariable}.${goName(precondition.when.field)} == ${goLiteral(precondition.when.equals)} {
-		${check3}
+		${check3.split("\n	").join("\n		")}
 	}`;
 }
 function preconditionMessage(operation) {
   const precondition = operation.precondition;
+  if ("policy" in precondition.requires) throw new Error("policy preconditions build their own message");
   const scope = precondition.when ? `${precondition.when.field}=${precondition.when.equals} requires` : "operation requires";
   const comparison = "after" in precondition.requires ? "after" : "at or after";
   return `${scope} ${precondition.requires.field} ${comparison} the request time`;
@@ -23986,9 +24179,41 @@ function guardBlocksValue(guard, value) {
   if ("equals" in guard) return value !== guard.equals;
   return typeof value === "string" ? !guard.in.includes(value) : true;
 }
-function renderLoadedStateGuard(operation, valueVariable) {
-  return operationGuards(operation).map((guard) => `
-	if ${guardFailureExpr(guard, valueVariable)} { writeError(w, http.StatusConflict, "${guardMessage(guard)}"); return }`).join("");
+function viaGuardMessage(guard, target) {
+  const condition = "equals" in guard ? `${guard.field}=${String(guard.equals)}` : `${guard.field} in [${guard.in.join(" ")}]`;
+  return `operation requires its ${lowerFirst(target.name)} (via ${guard.via}) to have ${condition}`;
+}
+function renderGuardChecks(contract, entity, operation, valueVariable) {
+  const lines = [];
+  const fetched = /* @__PURE__ */ new Set();
+  for (const guard of operationGuards(operation)) {
+    if (guard.via) {
+      const target = referencedEntityFor(contract, entity, guard.via);
+      const variable = `via${goName(guard.via)}`;
+      if (!fetched.has(guard.via)) {
+        fetched.add(guard.via);
+        lines.push(`${variable}, err := h.${lowerFirst(target.name)}s.Get(${valueVariable}.${goName(guard.via)})`);
+        lines.push(`if err != nil { writeError(w, http.StatusConflict, "${guard.via} references a ${lowerFirst(target.name)} that does not exist"); return }`);
+      }
+      lines.push(`if ${guardFailureExpr(guard, variable)} { writeError(w, http.StatusConflict, "${viaGuardMessage(guard, target)}"); return }`);
+    } else {
+      lines.push(`if ${guardFailureExpr(guard, valueVariable)} { writeError(w, http.StatusConflict, "${guardMessage(guard)}"); return }`);
+    }
+  }
+  return lines.map((line) => `
+	${line}`).join("");
+}
+function renderReferenceChecks(contract, entity, valueVariable) {
+  return entity.fields.filter((field) => field.references).map((field) => {
+    const target = contract.entities.find((item) => item.name === field.references.entity);
+    if (!target) throw new Error(`Field '${field.name}' of ${entity.name} references unknown entity.`);
+    const check3 = `if _, err := h.${lowerFirst(target.name)}s.Get(${valueVariable}.${goName(field.name)}); err != nil { writeError(w, http.StatusConflict, "${field.name} references a ${lowerFirst(target.name)} that does not exist"); return }`;
+    return field.required ? `
+	${check3}` : `
+	if ${valueVariable}.${goName(field.name)} != "" {
+		${check3}
+	}`;
+  }).join("");
 }
 function renderEmit(operation, valueVariable) {
   if (!operation.emits) return "";
