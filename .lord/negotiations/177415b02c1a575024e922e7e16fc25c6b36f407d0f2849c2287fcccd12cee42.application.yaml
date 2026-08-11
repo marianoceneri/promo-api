@@ -1,0 +1,51 @@
+version: "0.3"
+kind: application_negotiation
+negotiation_id: sha256:177415b02c1a575024e922e7e16fc25c6b36f407d0f2849c2287fcccd12cee42
+source_contract_id: sha256:bbdd4111b650fd48fbb3d2b7ea24b6299de2cfd0fb3baa7a5c16bdd460bf9d69
+request: Una promoción no debe poder quedar habilitada (enabled = true) cuando su fin de vigencia (ends_at) ya está en el pasado. Hoy el contrato de aplicación permite escribir enabled=true en CreatePromotion y UpdatePromotion sin ninguna precondición sobre ends_at; la política PromotionValidity (active_between) sólo informa vigencia al consultar, no impide habilitar.
+requested_by: marianoceneri
+created_at: 2026-08-11T14:15:08.746Z
+questions:
+  - question_id: AQ-VENCIDA-ALCANCE
+    question: ¿Sobre qué operaciones debe regir la prohibición de habilitar una promoción vencida?
+    alternatives:
+      - choice: 1
+        answer: "Sólo sobre el alta: rechazar CreatePromotion cuando llega con enabled=true y ends_at en el pasado."
+        consequence: UpdatePromotion sigue pudiendo llevar enabled=true con ends_at vencido; la garantía queda parcial.
+      - choice: 2
+        answer: "Sobre el alta y la modificación: CreatePromotion y UpdatePromotion rechazan cualquier resultado con enabled=true y ends_at en el pasado."
+        consequence: Toda escritura del catálogo queda sujeta a la precondición temporal; es la lectura literal del pedido de negocio.
+      - choice: 3
+        answer: Sobre una operación dedicada de habilitación, además del alta y la modificación.
+        consequence: Requiere primero incorporar la capacidad de alta/baja dedicada (transition sobre enabled), hoy inexistente en el contrato activo y objeto de una negociación previa no ratificada.
+  - question_id: AQ-VENCIDA-REFERENCIA
+    question: ¿Contra qué instante se compara ends_at para decidir si está en el pasado?
+    alternatives:
+      - choice: 1
+        answer: Contra el instante en que se ejecuta la operación, según el reloj del servicio.
+        consequence: "La precondición no es determinista respecto de una traza de eventos: el mismo pedido puede ser válido y luego inválido sin que cambie el dato."
+      - choice: 2
+        answer: Contra un instante de evaluación provisto explícitamente por el consumidor en la operación.
+        consequence: La operación de escritura incorpora un parámetro de instante y el resultado pasa a ser reproducible, pero el consumidor puede elegir un instante conveniente.
+  - question_id: AQ-VENCIDA-LIMITE
+    question: Si ends_at coincide exactamente con el instante de referencia, ¿la promoción se considera vencida?
+    alternatives:
+      - choice: 1
+        answer: "Sí: el fin de vigencia es exclusivo, por lo que ends_at igual al instante actual ya no admite habilitación."
+        consequence: Coherente con la política PromotionValidity vigente, que ya trata el fin como exclusivo.
+      - choice: 2
+        answer: "No: se admite habilitar mientras ends_at no sea estrictamente anterior al instante actual."
+        consequence: Introduce un criterio de borde distinto del que usa la evaluación de vigencia; el mismo instante daría 'habilitable' pero 'no vigente'.
+  - question_id: AQ-VENCIDA-EXISTENTE
+    question: ¿Qué ocurre con una promoción que ya está habilitada y cuyo fin de vigencia queda en el pasado?
+    alternatives:
+      - choice: 1
+        answer: "Nada: la regla sólo prohíbe el acto de habilitar; una promoción habilitada cuya vigencia venció permanece con enabled=true y se informa como no vigente."
+        consequence: El estado enabled deja de ser una garantía de vigencia; el consumidor sigue dependiendo de la evaluación de vigencia.
+      - choice: 2
+        answer: Se prohíbe además mover ends_at al pasado mientras la promoción esté habilitada.
+        consequence: UpdatePromotion queda restringida también en el campo ends_at, no sólo en enabled.
+      - choice: 3
+        answer: El catálogo debe deshabilitarla automáticamente al vencer la vigencia.
+        consequence: Introduce un cambio de estado sin operación del consumidor, es decir un efecto temporal autónomo del sistema.
+decisions: []

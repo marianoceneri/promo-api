@@ -1,0 +1,72 @@
+version: "0.3"
+kind: application_negotiation
+negotiation_id: sha256:4ea982097b9e70c8364e8644c3c13a234ae6249c51d2104bdca691168f30ae05
+source_contract_id: sha256:bbdd4111b650fd48fbb3d2b7ea24b6299de2cfd0fb3baa7a5c16bdd460bf9d69
+request: Incorporar la baja de promociones como capacidad de negocio explícita del catálogo, hoy inexistente en el contrato de aplicación (solo existe la modificación genérica del campo enabled mediante UpdatePromotion).
+requested_by: marianoceneri
+created_at: 2026-08-10T00:52:49.073Z
+questions:
+  - question_id: AQ-BAJA-NATURALEZA
+    question: ¿Qué significa dar de baja una promoción en el catálogo?
+    alternatives:
+      - choice: 1
+        answer: "Baja lógica: la promoción permanece en el catálogo con enabled=false y sigue siendo consultable."
+        consequence: Se agrega una operación dedicada de transición sobre el campo enabled (true -> false). La promoción sigue existiendo y su historia se conserva.
+      - choice: 2
+        answer: "Baja física: la promoción se elimina del catálogo y deja de existir."
+        consequence: Se agrega una operación de borrado. Las consultas posteriores por identificador dejan de tener sujeto y la vigencia ya no puede evaluarse.
+  - question_id: AQ-BAJA-REALTA
+    question: Una vez dada de baja, ¿puede volver a darse de alta la misma promoción?
+    alternatives:
+      - choice: 1
+        answer: "No: la baja es definitiva para ese identificador."
+        consequence: El evento de baja es único por promoción y no existe operación de rehabilitación.
+      - choice: 2
+        answer: "Sí: puede rehabilitarse mediante una operación dedicada de alta."
+        consequence: Se agrega una segunda operación de transición (false -> true) con su propio evento, y la baja deja de ser única.
+  - question_id: AQ-BAJA-EFECTO
+    question: ¿Qué operaciones quedan prohibidas sobre una promoción dada de baja?
+    alternatives:
+      - choice: 1
+        answer: "Ninguna: sigue consultable, listable, evaluable en vigencia y modificable."
+        consequence: No se agregan precondiciones de estado; la baja solo afecta el resultado de la política de vigencia.
+      - choice: 2
+        answer: No puede modificarse, pero sí consultarse y evaluarse su vigencia.
+        consequence: UpdatePromotion incorpora una precondición de estado sobre enabled y una regla operacional que impide modificar después de la baja.
+      - choice: 3
+        answer: No puede modificarse ni evaluarse su vigencia; solo consultarse.
+        consequence: Tanto UpdatePromotion como CheckPromotionValidity incorporan precondición de estado y reglas operacionales correspondientes.
+  - question_id: AQ-BAJA-VISIBILIDAD
+    question: ¿Cómo aparecen las promociones dadas de baja en el listado del catálogo?
+    alternatives:
+      - choice: 1
+        answer: Se listan junto con las activas, sin distinción en la operación.
+        consequence: ListPromotions no cambia; el consumidor discrimina por el campo enabled.
+      - choice: 2
+        answer: El listado debe poder filtrarse por estado.
+        consequence: ListPromotions incorpora un parámetro de consulta por estado, sujeto a que el esquema de aplicación soporte filtrado en operaciones de listado.
+decisions:
+  - question_id: AQ-BAJA-NATURALEZA
+    revision: 1
+    choice: 1
+    decided_by: marianoceneri
+    rationale: "El operador eligió baja lógica: la promoción permanece en el catálogo con enabled=false y sigue siendo consultable, mediante una operación dedicada de transición."
+    decided_at: 2026-08-10T00:53:11.596Z
+  - question_id: AQ-BAJA-REALTA
+    revision: 1
+    choice: 2
+    decided_by: marianoceneri
+    rationale: "El operador eligió permitir rehabilitación: una promoción dada de baja puede volver a activarse mediante una operación dedicada de transición (false -> true) con su propio evento; la baja no es única por promoción."
+    decided_at: 2026-08-10T00:53:36.627Z
+  - question_id: AQ-BAJA-EFECTO
+    revision: 1
+    choice: 3
+    decided_by: marianoceneri
+    rationale: El operador decidió que mientras la promoción está dada de baja no puede modificarse ni evaluarse su vigencia; solo puede consultarse. UpdatePromotion y CheckPromotionValidity llevan precondición de estado sobre enabled y reglas operacionales prohibits_between correlacionadas por promotion_id.
+    decided_at: 2026-08-10T00:54:52.129Z
+  - question_id: AQ-BAJA-VISIBILIDAD
+    revision: 1
+    choice: 2
+    decided_by: marianoceneri
+    rationale: El operador decidió que el listado del catálogo debe poder filtrarse por estado de habilitación, sujeto al soporte del esquema de aplicación para filtrado en operaciones de listado.
+    decided_at: 2026-08-10T00:55:23.254Z
