@@ -23,7 +23,8 @@ func NewRecorder() *Recorder { return &Recorder{historyComplete: true} }
 func (r *Recorder) Record(eventType string, data map[string]any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.events = append(r.events, Event{Type: eventType, At: time.Now().UTC(), Data: data})
+	event := Event{Type: eventType, At: time.Now().UTC(), Data: data}
+	r.events = append(r.events, event)
 }
 
 func (r *Recorder) Snapshot() []Event {

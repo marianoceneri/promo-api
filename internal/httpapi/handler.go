@@ -252,11 +252,10 @@ func (h *Handler) enablePromotion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	value.Enabled = true
-	if value.Enabled == true {
-		if value.EndsAt.Before(time.Now().UTC()) {
-			writeError(w, http.StatusConflict, "enabled=true requires ends_at at or after the request time")
-			return
-		}
+	// EnablePromotion always leaves enabled=true, so the clause always applies.
+	if value.EndsAt.Before(time.Now().UTC()) {
+		writeError(w, http.StatusConflict, "enabled=true requires ends_at at or after the request time")
+		return
 	}
 	if err := h.promotions.Update(value); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not transition promotion")
