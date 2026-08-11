@@ -107,6 +107,9 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "enabled is immutable")
 		return
 	}
+	if value.Status == "" {
+		value.Status = current.Status
+	}
 	if current.Status != value.Status {
 		writeError(w, http.StatusConflict, "status is immutable")
 		return
@@ -189,6 +192,10 @@ func (h *Handler) disablePromotion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not get promotion")
 		return
 	}
+	if value.Status != "draft" && value.Status != "published" {
+		writeError(w, http.StatusConflict, "operation requires status in [draft published]")
+		return
+	}
 	if value.Enabled != true {
 		writeError(w, http.StatusConflict, "transition requires enabled=true")
 		return
@@ -211,6 +218,10 @@ func (h *Handler) enablePromotion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "could not get promotion")
+		return
+	}
+	if value.Status != "draft" && value.Status != "published" {
+		writeError(w, http.StatusConflict, "operation requires status in [draft published]")
 		return
 	}
 	if value.Enabled != false {

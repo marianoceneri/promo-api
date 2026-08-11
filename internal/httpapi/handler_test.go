@@ -95,56 +95,14 @@ func TestPromotionContractFlow(t *testing.T) {
 	request = httptest.NewRequest(http.MethodPost, "/v1/promotions/PROMO-TEST/disable", nil)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("DisablePromotion status = %d, body = %s", response.Code, response.Body.String())
-	}
-	if response.Header().Get("X-LORD-Event") != "PromocionDadaDeBaja" {
-		t.Fatal("DisablePromotion did not emit its contractual event")
-	}
-	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMO-TEST", bytes.NewReader([]byte("{\"id\":\"PROMO-TEST\",\"name\":\"name-test\",\"starts_at\":\"2030-01-01T00:00:00Z\",\"ends_at\":\"2031-01-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":true,\"status\":\"draft\"}")))
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
-		t.Fatalf("UpdatePromotion after DisablePromotion status = %d, want 409", response.Code)
-	}
-	request = httptest.NewRequest(http.MethodGet, "/v1/promotions/PROMO-TEST/validity?at=2030-06-01T00%3A00%3A00Z", nil)
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusConflict {
-		t.Fatalf("CheckPromotionValidity after DisablePromotion status = %d, want 409", response.Code)
-	}
-	request = httptest.NewRequest(http.MethodGet, "/v1/promotions?enabled=false", nil)
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "PROMO-TEST") {
-		t.Fatalf("ListPromotions matching filter did not return transitioned entity: %s", response.Body.String())
-	}
-	request = httptest.NewRequest(http.MethodGet, "/v1/promotions?enabled=true", nil)
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "PROMO-TEST") {
-		t.Fatalf("ListPromotions opposite filter returned transitioned entity: %s", response.Body.String())
+		t.Fatalf("blocked DisablePromotion status = %d, want 409, body = %s", response.Code, response.Body.String())
 	}
 	request = httptest.NewRequest(http.MethodPost, "/v1/promotions/PROMO-TEST/enable", nil)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("EnablePromotion status = %d, body = %s", response.Code, response.Body.String())
-	}
-	if response.Header().Get("X-LORD-Event") != "PromocionRehabilitada" {
-		t.Fatal("EnablePromotion did not emit its contractual event")
-	}
-	request = httptest.NewRequest(http.MethodGet, "/v1/promotions?enabled=true", nil)
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "PROMO-TEST") {
-		t.Fatalf("ListPromotions matching filter did not return transitioned entity: %s", response.Body.String())
-	}
-	request = httptest.NewRequest(http.MethodGet, "/v1/promotions?enabled=false", nil)
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "PROMO-TEST") {
-		t.Fatalf("ListPromotions opposite filter returned transitioned entity: %s", response.Body.String())
+	if response.Code != http.StatusConflict {
+		t.Fatalf("blocked EnablePromotion status = %d, want 409, body = %s", response.Code, response.Body.String())
 	}
 	request = httptest.NewRequest(http.MethodGet, "/_lord/events", nil)
 	response = httptest.NewRecorder()
