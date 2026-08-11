@@ -37,4 +37,4 @@ jobs:
           node-version: 22
 
       - name: Verify contracts, approvals and generated sources
-        run: node .lord/tooling/lord-check.cjs check --project "$GITHUB_WORKSPACE" --json
+        run: node .lord/tooling/lord-check.cjs check --project "$GITHUB_WORKSPACE" --run-tests --json

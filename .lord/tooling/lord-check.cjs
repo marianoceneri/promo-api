@@ -7362,10 +7362,182 @@ var require_dist = __commonJS({
 });
 
 // src/workspace/check-cli.ts
-var import_node_util2 = require("node:util");
+var import_node_util3 = require("node:util");
+
+// src/analysis/analyzer.ts
+var AnalyzerUnavailableError = class extends Error {
+  constructor(reason) {
+    super(`The Z3 analysis engine is not available in this environment: ${reason}`);
+    this.name = "AnalyzerUnavailableError";
+  }
+};
+var apiPromise;
+var contextCounter = 0;
+function getApi() {
+  apiPromise ??= import("z3-solver").then(
+    (module2) => module2.init(),
+    (error51) => {
+      throw new AnalyzerUnavailableError(error51 instanceof Error ? error51.message : String(error51));
+    }
+  );
+  return apiPromise;
+}
+async function shutdownAnalyzer() {
+  if (!apiPromise) return;
+  const pending = apiPromise;
+  apiPromise = void 0;
+  try {
+    (await pending).em.PThread.terminateAllThreads();
+  } catch {
+  }
+}
+async function analyzeContract(contract, options = {}) {
+  const bound = options.bound ?? Math.max(8, contract.vocabulary.events.length * 2);
+  if (!Number.isInteger(bound) || bound < 1) throw new Error("analysis bound must be a positive integer");
+  const { Context } = await getApi();
+  const contextName = `lord-analysis-${contextCounter++}`;
+  const ctx = Context(contextName);
+  const solver = new ctx.Solver();
+  const events = contract.vocabulary.events;
+  const NONE = events.length;
+  const indexOf = new Map(events.map((event, position) => [event, position]));
+  const eventIndex = (event) => {
+    const index = indexOf.get(event);
+    if (index === void 0) throw new Error(`rule references event '${event}' outside the vocabulary`);
+    return index;
+  };
+  const length = ctx.Int.const("trace_length");
+  const slots = Array.from({ length: bound }, (_, position) => ctx.Int.const(`event_${position}`));
+  const at = (position, event) => slots[position].eq(eventIndex(event));
+  const conjunction = (clauses) => clauses.length === 0 ? ctx.Bool.val(true) : ctx.And(...clauses);
+  solver.add(length.ge(0), length.le(bound));
+  slots.forEach((slot, position) => {
+    solver.add(ctx.If(length.gt(position), ctx.And(slot.ge(0), slot.lt(NONE)), slot.eq(NONE)));
+  });
+  const trackedRules = /* @__PURE__ */ new Map();
+  contract.rules.forEach((rule, position) => {
+    const tracker = `track_${position}`;
+    trackedRules.set(tracker, rule.id);
+    solver.addAndTrack(encodeRule(ctx, rule, bound, length, at, conjunction), ctx.Bool.const(tracker));
+  });
+  const coreRuleIDs = () => {
+    const ids = /* @__PURE__ */ new Set();
+    for (const entry of solver.unsatCore().values()) {
+      const id = trackedRules.get(entry.toString().replace(/^\|/, "").replace(/\|$/, ""));
+      if (id !== void 0) ids.add(id);
+    }
+    return [...ids].sort();
+  };
+  const notes = [
+    `Bounded analysis: only histories of length <= ${bound} are examined; longer traces are out of scope.`
+  ];
+  if (contract.rules.some((rule) => (rule.correlate_by ?? []).length > 0)) {
+    notes.push("Correlated rules are analyzed for a single shared business instance.");
+  }
+  const consistency = await solver.check();
+  if (consistency === "unknown") {
+    return { contract: contract.name, engine: "z3", bound, scope: "single_instance", verdict: "unknown", dead_events: [], notes };
+  }
+  if (consistency === "unsat") {
+    return {
+      contract: contract.name,
+      engine: "z3",
+      bound,
+      scope: "single_instance",
+      verdict: "inconsistent",
+      conflict_rule_ids: coreRuleIDs(),
+      dead_events: [],
+      notes
+    };
+  }
+  const witness = extractWitness(solver.model(), length, slots, events);
+  const deadEvents = [];
+  for (const event of events) {
+    const occurs = ctx.Or(...slots.map((slot) => slot.eq(eventIndex(event))));
+    const verdict = await solver.check(occurs);
+    if (verdict === "unsat") deadEvents.push({ event, conflict_rule_ids: coreRuleIDs() });
+  }
+  return {
+    contract: contract.name,
+    engine: "z3",
+    bound,
+    scope: "single_instance",
+    verdict: "consistent",
+    witness,
+    dead_events: deadEvents,
+    notes
+  };
+}
+function encodeRule(ctx, rule, bound, length, at, conjunction) {
+  switch (rule.kind) {
+    case "initial":
+      return ctx.And(length.gt(0), at(0, rule.event));
+    case "unique":
+      return conjunction(forbiddenPairs(ctx, bound, at, rule.event, rule.event));
+    case "only_after": {
+      const clauses = [ctx.Not(at(0, rule.event))];
+      for (let position = 1; position < bound; position += 1) {
+        const earlier = Array.from({ length: position }, (_, index) => at(index, rule.required));
+        clauses.push(ctx.Implies(at(position, rule.event), ctx.Or(...earlier)));
+      }
+      return conjunction(clauses);
+    }
+    case "obliges": {
+      let pending = ctx.Int.val(0);
+      for (let position = 0; position < bound; position += 1) {
+        pending = ctx.If(
+          at(position, rule.trigger),
+          pending.add(1),
+          ctx.If(ctx.And(at(position, rule.target), pending.gt(0)), pending.sub(1), pending)
+        );
+      }
+      return pending.eq(0);
+    }
+    case "prohibits_after":
+      return conjunction(forbiddenPairs(ctx, bound, at, rule.trigger, rule.prohibited));
+    case "alternates": {
+      let open = ctx.Bool.val(false);
+      const clauses = [];
+      for (let position = 0; position < bound; position += 1) {
+        clauses.push(ctx.Implies(at(position, rule.trigger), ctx.Not(open)));
+        clauses.push(ctx.Implies(at(position, rule.target), open));
+        open = ctx.If(at(position, rule.trigger), ctx.Bool.val(true), ctx.If(at(position, rule.target), ctx.Bool.val(false), open));
+      }
+      return conjunction(clauses);
+    }
+    case "prohibits_between": {
+      let open = ctx.Bool.val(false);
+      const clauses = [];
+      for (let position = 0; position < bound; position += 1) {
+        clauses.push(ctx.Implies(at(position, rule.prohibited), ctx.Not(open)));
+        open = ctx.If(at(position, rule.trigger), ctx.Bool.val(true), ctx.If(at(position, rule.target), ctx.Bool.val(false), open));
+      }
+      return conjunction(clauses);
+    }
+  }
+}
+function forbiddenPairs(ctx, bound, at, first, second) {
+  const clauses = [];
+  for (let earlier = 0; earlier < bound; earlier += 1) {
+    for (let later = earlier + 1; later < bound; later += 1) {
+      clauses.push(ctx.Not(ctx.And(at(earlier, first), at(later, second))));
+    }
+  }
+  return clauses;
+}
+function extractWitness(model, length, slots, events) {
+  const traceLength = Number(model.eval(length, true).toString());
+  return slots.slice(0, traceLength).map((slot) => {
+    const event = events[Number(model.eval(slot, true).toString())];
+    if (event === void 0) throw new Error("Z3 model assigned an event index outside the vocabulary");
+    return event;
+  });
+}
 
 // src/workspace/checker.ts
+var import_node_child_process2 = require("node:child_process");
 var import_promises8 = require("node:fs/promises");
+var import_node_util2 = require("node:util");
 var import_yaml12 = __toESM(require_dist(), 1);
 
 // node_modules/zod/v4/classic/external.js
@@ -22444,6 +22616,22 @@ var applicationOperationSchema = external_exports.object({
   state_guard: external_exports.object({
     field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
     equals: external_exports.boolean()
+  }).strict().optional(),
+  precondition: external_exports.object({
+    when: external_exports.object({
+      field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+      equals: external_exports.boolean()
+    }).strict().optional(),
+    requires: external_exports.union([
+      external_exports.object({
+        field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+        at_or_after: external_exports.literal("request_time")
+      }).strict(),
+      external_exports.object({
+        field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+        after: external_exports.literal("request_time")
+      }).strict()
+    ])
   }).strict().optional()
 }).strict();
 var validityPolicySchema = external_exports.object({
@@ -22534,6 +22722,21 @@ var applicationContractSchema = external_exports.object({
       if (!needsID) context.addIssue({ code: "custom", path: ["operations", index, "state_guard"], message: "state guards require an entity-instance operation" });
       if (entity?.fields.find((field) => field.name === operation.state_guard?.field)?.type !== "boolean") {
         context.addIssue({ code: "custom", path: ["operations", index, "state_guard", "field"], message: "state guard field must reference a boolean entity field" });
+      }
+    }
+    if (operation.precondition) {
+      if (!["create", "update", "transition"].includes(operation.kind)) {
+        context.addIssue({ code: "custom", path: ["operations", index, "precondition"], message: "preconditions apply only to create, update or transition operations" });
+      }
+      const when = operation.precondition.when;
+      if (when && entity?.fields.find((field) => field.name === when.field)?.type !== "boolean") {
+        context.addIssue({ code: "custom", path: ["operations", index, "precondition", "when", "field"], message: "precondition when.field must reference a boolean entity field" });
+      }
+      if (entity?.fields.find((field) => field.name === operation.precondition?.requires.field)?.type !== "datetime") {
+        context.addIssue({ code: "custom", path: ["operations", index, "precondition", "requires", "field"], message: "precondition requires.field must reference a datetime entity field" });
+      }
+      if (operation.kind === "transition" && when && operation.transition && when.field === operation.transition.field && when.equals !== operation.transition.to) {
+        context.addIssue({ code: "custom", path: ["operations", index, "precondition", "when"], message: "precondition when clause can never match the transition target state" });
       }
     }
   });
@@ -22802,6 +23005,10 @@ ${steps.join("\n")}
       const update = contract.operations.find((operation) => operation.entity === entity.name && operation.kind === "update");
       if (update && field.immutable && field.name !== entity.id_field) blocks.push(renderImmutableFieldTest(entity, create, update, field, stores));
     }
+    for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.precondition)) {
+      const block = renderPreconditionTest(entity, create, guarded, stores);
+      if (block) blocks.push(block);
+    }
     return blocks;
   }).join("\n\n");
   const stringImport = contract.operations.some((operation) => operation.kind === "list" && operation.parameters.length > 0) ? '\n	"strings"' : "";
@@ -22820,6 +23027,96 @@ import (
 
 ${tests}
 `;
+}
+var EXPIRED_START = "2000-01-01T00:00:00Z";
+var EXPIRED_END = "2000-02-01T00:00:00Z";
+var FUTURE_END = "2999-01-01T00:00:00Z";
+function preconditionBody(entity, operation, variant, idValue) {
+  const precondition = operation.precondition;
+  const body = Object.fromEntries(entity.fields.map((field) => [field.name, sampleValue(field)]));
+  body[entity.id_field] = idValue;
+  body[precondition.requires.field] = variant === "future_matched" ? FUTURE_END : EXPIRED_END;
+  if (variant !== "future_matched" && precondition.requires.field === "ends_at" && "starts_at" in body) body["starts_at"] = EXPIRED_START;
+  if (precondition.when) body[precondition.when.field] = variant === "expired_unmatched" ? !precondition.when.equals : precondition.when.equals;
+  return body;
+}
+function renderPreconditionTest(entity, create, operation, stores) {
+  const testName = `Test${entity.name}${operation.id}Precondition`;
+  if (operation.kind === "create") {
+    const cases = [
+      { name: "expired_blocked", body: preconditionBody(entity, operation, "expired_matched", `${entity.name.toUpperCase()}-PRE-EXPIRED`), want: "http.StatusConflict" },
+      { name: "future_allowed", body: preconditionBody(entity, operation, "future_matched", `${entity.name.toUpperCase()}-PRE-FUTURE`), want: "http.StatusCreated" },
+      ...operation.precondition.when ? [{ name: "expired_unguarded_allowed", body: preconditionBody(entity, operation, "expired_unmatched", `${entity.name.toUpperCase()}-PRE-UNGUARDED`), want: "http.StatusCreated" }] : []
+    ];
+    const rows = cases.map((item) => `		{name: ${JSON.stringify(item.name)}, body: ${JSON.stringify(JSON.stringify(item.body))}, want: ${item.want}},`).join("\n");
+    return `func ${testName}(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+${rows}
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(${stores})
+			request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(operation.path)}, bytes.NewReader([]byte(test.body)))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want { t.Fatalf("status = %d, want %d, body = %s", response.Code, test.want, response.Body.String()) }
+		})
+	}
+}`;
+  }
+  if (operation.kind === "update") {
+    const idValue = `${entity.name.toUpperCase()}-PRE-UPDATE`;
+    const baseline = preconditionBody(entity, operation, "future_matched", idValue);
+    const expired = preconditionBody(entity, operation, "expired_matched", idValue);
+    const whenIsMutable = operation.precondition.when && !entity.fields.find((field) => field.name === operation.precondition.when.field)?.immutable;
+    const unguarded = whenIsMutable ? preconditionBody(entity, operation, "expired_unmatched", idValue) : null;
+    const steps = [
+      `	request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(baseline))})))`,
+      "	response := httptest.NewRecorder()",
+      "	handler.ServeHTTP(response, request)",
+      '	if response.Code != http.StatusCreated { t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String()) }',
+      `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(operation.path.replace("{id}", idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(expired))})))`,
+      "	response = httptest.NewRecorder()",
+      "	handler.ServeHTTP(response, request)",
+      '	if response.Code != http.StatusConflict { t.Fatalf("expired update status = %d, want 409, body = %s", response.Code, response.Body.String()) }'
+    ];
+    if (unguarded) steps.push(
+      `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(operation.path.replace("{id}", idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(unguarded))})))`,
+      "	response = httptest.NewRecorder()",
+      "	handler.ServeHTTP(response, request)",
+      '	if response.Code != http.StatusOK { t.Fatalf("unguarded expired update status = %d, want 200, body = %s", response.Code, response.Body.String()) }'
+    );
+    return `func ${testName}(t *testing.T) {
+	handler := NewHandler(${stores})
+${steps.join("\n")}
+}`;
+  }
+  if (operation.kind === "transition" && operation.transition) {
+    const idValue = `${entity.name.toUpperCase()}-PRE-TRANSITION`;
+    const setup = preconditionBody(entity, operation, "expired_matched", idValue);
+    setup[operation.transition.field] = operation.transition.from ?? !operation.transition.to;
+    const createGuard = create.precondition;
+    if (createGuard) {
+      if (!createGuard.when) return null;
+      if (setup[createGuard.when.field] === createGuard.when.equals) return null;
+    }
+    return `func ${testName}(t *testing.T) {
+	handler := NewHandler(${stores})
+	request := httptest.NewRequest(http.MethodPost, ${JSON.stringify(create.path)}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(setup))})))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated { t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String()) }
+	request = httptest.NewRequest(http.MethodPost, ${JSON.stringify(operation.path.replace("{id}", idValue))}, nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict { t.Fatalf("expired transition status = %d, want 409, body = %s", response.Code, response.Body.String()) }
+}`;
+  }
+  return null;
 }
 function renderImmutableFieldTest(entity, create, update, field, stores) {
   const original = Object.fromEntries(entity.fields.map((item) => [item.name, sampleValue(item)]));
@@ -23033,7 +23330,7 @@ function renderHandler(contract) {
   const standardImports = ["encoding/json", "errors", "io", "net/http"];
   if (contract.entities.some((entity) => entity.fields.some((field) => field.minimum !== void 0 || field.maximum !== void 0))) standardImports.push("fmt");
   if (contract.entities.some((entity) => entity.fields.some((field) => field.required && field.type === "string"))) standardImports.push("strings");
-  if (contract.operations.some((operation) => operation.kind === "evaluate_validity" || operation.kind === "list" && operation.parameters.some((parameter) => parameter.type === "datetime"))) standardImports.push("time");
+  if (contract.operations.some((operation) => operation.kind === "evaluate_validity" || operation.precondition !== void 0 || operation.kind === "list" && operation.parameters.some((parameter) => parameter.type === "datetime"))) standardImports.push("time");
   if (contract.operations.some((operation) => operation.kind === "list" && operation.parameters.some((parameter) => parameter.type === "boolean" || parameter.type === "integer"))) standardImports.push("strconv");
   standardImports.sort();
   const imports = standardImports.map((item) => `	"${item}"`).join("\n");
@@ -23098,7 +23395,7 @@ function renderOperation(contract, operation) {
 	var value domain.${entity.name}
 	if err := decodeJSON(r, &value); err != nil { writeError(w, http.StatusBadRequest, "invalid JSON body"); return }
 	apply${entity.name}Defaults(&value)
-	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }${renderPrecondition(operation, "value")}
 	if err := ${receiver}.Create(value); err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) { writeError(w, http.StatusConflict, "${entity.id_field} already exists"); return }
 		writeError(w, http.StatusInternalServerError, "could not create ${lowerFirst(entity.name)}"); return
@@ -23135,7 +23432,7 @@ function renderOperation(contract, operation) {
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	value, err := ${receiver}.Get(r.PathValue("id"))
 	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${expected}
-	value.${field} = ${operation.transition.to}
+	value.${field} = ${operation.transition.to}${renderPrecondition(operation, "value")}
 	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not transition ${lowerFirst(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
@@ -23177,7 +23474,7 @@ function renderGovernedUpdateOperation(operation, entity, receiver, functionName
 	if value.${id} == "" { value.${id} = id }
 	if value.${id} != id { writeError(w, http.StatusBadRequest, "immutable ${entity.id_field} does not match path"); return }${immutableChecks}
 	apply${entity.name}Defaults(&value)
-	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	if err := validate${entity.name}(value); err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }${renderPrecondition(operation, "value")}
 	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not update ${lowerFirst(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
@@ -23234,6 +23531,25 @@ function renderValidityOperation(contract, operation, entity, receiver, function
 	valid := !evaluatedAt.Before(value.${goName(policy.start_field)}) && evaluatedAt.Before(value.${goName(policy.end_field)})${enabled}${emit}
 	writeJSON(w, http.StatusOK, map[string]any{"id": value.${id}, "valid": valid, "${instant.name}": evaluatedAt, "characteristics": value})
 }`;
+}
+function renderPrecondition(operation, valueVariable) {
+  const precondition = operation.precondition;
+  if (!precondition) return "";
+  const requires = goName(precondition.requires.field);
+  const failure = "after" in precondition.requires ? `!${valueVariable}.${requires}.After(time.Now().UTC())` : `${valueVariable}.${requires}.Before(time.Now().UTC())`;
+  const check3 = `if ${failure} { writeError(w, http.StatusConflict, "${preconditionMessage(operation)}"); return }`;
+  if (!precondition.when) return `
+	${check3}`;
+  return `
+	if ${valueVariable}.${goName(precondition.when.field)} == ${precondition.when.equals} {
+		${check3}
+	}`;
+}
+function preconditionMessage(operation) {
+  const precondition = operation.precondition;
+  const scope = precondition.when ? `${precondition.when.field}=${precondition.when.equals} requires` : "operation requires";
+  const comparison = "after" in precondition.requires ? "after" : "at or after";
+  return `${scope} ${precondition.requires.field} ${comparison} the request time`;
 }
 function renderLoadedStateGuard(operation, valueVariable) {
   if (!operation.state_guard) return "";
@@ -23443,7 +23759,12 @@ async function loadContractProposal(workspace, proposalID) {
   const path = resolveLordOutput(workspace, "proposals", `${proposalID.slice("sha256:".length)}.proposal.yaml`);
   const raw = proposalSchema.parse((0, import_yaml9.parse)(await (0, import_promises6.readFile)(path, "utf8")));
   const parsed = parseContract(JSON.stringify(raw.contract));
-  if (!parsed.ok || !parsed.value || fingerprint(parsed.value) !== raw.proposed_contract_id) throw new Error("Contract proposal integrity check failed.");
+  if (!parsed.ok || !parsed.value) {
+    throw new Error(`Contract proposal cannot be parsed by this engine (a newer engine may have written it; restart stale plugin servers after rebuilding): ${parsed.errors.join("; ")}`);
+  }
+  if (fingerprint(parsed.value) !== raw.proposed_contract_id) {
+    throw new Error("Contract proposal integrity check failed: the stored contract does not match proposed_contract_id.");
+  }
   const identity = { source_contract_id: raw.source_contract_id, proposed_contract_id: raw.proposed_contract_id, proposed_by: raw.proposed_by, rationale: raw.rationale };
   if (fingerprint(identity) !== raw.proposal_id) throw new Error("Contract proposal identity check failed.");
   return { ...raw, contract: parsed.value };
@@ -23478,7 +23799,10 @@ var applicationNegotiationSchema = external_exports.object({
   requested_by: external_exports.string().min(1),
   created_at: external_exports.string().datetime(),
   questions: external_exports.array(questionSchema),
-  decisions: external_exports.array(decisionSchema)
+  decisions: external_exports.array(decisionSchema),
+  rebased_from: external_exports.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  rebase_confirmed_by: external_exports.string().min(1).optional(),
+  rebased_at: external_exports.string().datetime().optional()
 }).strict();
 
 // src/application/lifecycle.ts
@@ -23502,7 +23826,12 @@ async function loadApplicationProposal(workspace, proposalID) {
   const path = resolveLordOutput(workspace, "proposals", `${proposalID.slice(7)}.application.yaml`);
   const raw = proposalSchema2.parse((0, import_yaml11.parse)(await (0, import_promises7.readFile)(path, "utf8")));
   const parsed = parseApplicationContract(JSON.stringify(raw.contract));
-  if (!parsed.ok || fingerprint(parsed.value) !== raw.proposed_contract_id) throw new Error("Application proposal integrity check failed.");
+  if (!parsed.ok) {
+    throw new Error(`Application proposal contract cannot be parsed by this engine (a newer engine may have written it; restart stale plugin servers after rebuilding): ${parsed.errors.join("; ")}`);
+  }
+  if (fingerprint(parsed.value) !== raw.proposed_contract_id) {
+    throw new Error("Application proposal integrity check failed: the stored contract does not match proposed_contract_id.");
+  }
   if (fingerprint({ source_contract_id: raw.source_contract_id, proposed_contract_id: raw.proposed_contract_id, proposed_by: raw.proposed_by, rationale: raw.rationale, ...raw.negotiation_id ? { negotiation_id: raw.negotiation_id, decisions_fingerprint: raw.decisions_fingerprint } : {} }) !== raw.proposal_id) {
     throw new Error("Application proposal identity check failed.");
   }
@@ -23522,7 +23851,8 @@ var generatedManifestSchema = external_exports.object({
   generated_at: external_exports.string().datetime(),
   files: external_exports.record(external_exports.string(), external_exports.string().regex(/^sha256:[a-f0-9]{64}$/))
 }).strict();
-async function checkLordWorkspace(projectPath) {
+var execFileAsync2 = (0, import_node_util2.promisify)(import_node_child_process2.execFile);
+async function checkLordWorkspace(projectPath, options = {}) {
   const workspace = await loadLordWorkspace(projectPath);
   const operationalID = fingerprint(workspace.contract);
   const applicationID = workspace.application ? fingerprint(workspace.application) : null;
@@ -23546,6 +23876,7 @@ async function checkLordWorkspace(projectPath) {
     operationalApprovals.length > 0 ? "The active operational contract has a verifiable approval." : "The active operational contract has no v0.3 verifiable approval.",
     operationalApprovals.map((item) => item.approval.approval_id)
   ));
+  checks.push(await contractAnalysisCheck(workspace.contract));
   if (!workspace.application || !applicationID) {
     checks.push(check2("application_contract", false, "The workspace has no active application contract."));
   } else {
@@ -23597,6 +23928,9 @@ async function checkLordWorkspace(projectPath) {
       manifest?.contract_id === applicationID ? "The generation manifest targets the active application contract." : "The generation manifest is missing, invalid, or stale.",
       { expected: applicationID, actual: manifest?.contract_id ?? null }
     ));
+    if (options.runTests) {
+      checks.push(await generatedTestSuiteCheck(workspace.projectDirectory, workspace.application.target.kind));
+    }
   }
   return {
     verdict: checks.every((item) => item.verdict === "valid") ? "valid" : "violation",
@@ -23605,6 +23939,39 @@ async function checkLordWorkspace(projectPath) {
     application_contract_id: applicationID,
     checks
   };
+}
+async function generatedTestSuiteCheck(projectDirectory, targetKind) {
+  if (targetKind !== "go-rest") {
+    return check2("generated_test_suite", true, `Test execution is not implemented for target '${targetKind}'; the suite was not run.`, { status: "skipped" });
+  }
+  try {
+    await execFileAsync2("go", ["test", "./..."], { cwd: projectDirectory, timeout: 12e4 });
+    return check2("generated_test_suite", true, "The generated Go test suite passes.");
+  } catch (error51) {
+    const output = typeof error51 === "object" && error51 ? `${"stdout" in error51 ? String(error51.stdout) : ""}
+${"stderr" in error51 ? String(error51.stderr) : ""}`.trim() : String(error51);
+    return check2("generated_test_suite", false, "The generated Go test suite fails.", { output: output.slice(-1200) });
+  }
+}
+async function contractAnalysisCheck(contract) {
+  try {
+    const analysis = await analyzeContract(contract);
+    if (analysis.verdict === "unknown") {
+      return check2("contract_analysis", true, "Contract analysis was inconclusive (Z3 returned unknown); rule-set consistency is not certified.", analysis);
+    }
+    const healthy = analysis.verdict === "consistent" && analysis.dead_events.length === 0;
+    return check2(
+      "contract_analysis",
+      healthy,
+      healthy ? "The operational rule set is consistent and every vocabulary event remains executable." : "The operational rule set contains conflicting rules or dead events.",
+      analysis
+    );
+  } catch (error51) {
+    if (error51 instanceof AnalyzerUnavailableError) {
+      return check2("contract_analysis", true, `Contract analysis was skipped: ${error51.message}`, { status: "skipped" });
+    }
+    throw error51;
+  }
 }
 function check2(id, valid, message, details) {
   return { id, verdict: valid ? "valid" : "violation", message, ...details === void 0 ? {} : { details } };
@@ -23620,16 +23987,16 @@ async function readGeneratedManifest(path) {
 
 // src/workspace/check-cli.ts
 async function main() {
-  const options = (0, import_node_util2.parseArgs)({
+  const options = (0, import_node_util3.parseArgs)({
     args: process.argv.slice(2),
-    options: { project: { type: "string" }, json: { type: "boolean", default: false } },
+    options: { project: { type: "string" }, json: { type: "boolean", default: false }, "run-tests": { type: "boolean", default: false } },
     allowPositionals: true,
     strict: true
   });
   if (options.positionals.length > 1 || options.positionals[0] && options.positionals[0] !== "check") {
-    throw new Error("Usage: lord-check [check] [--project <repository>] [--json]");
+    throw new Error("Usage: lord-check [check] [--project <repository>] [--run-tests] [--json]");
   }
-  const result = await checkLordWorkspace(options.values.project);
+  const result = await checkLordWorkspace(options.values.project, { runTests: options.values["run-tests"] ?? false });
   if (options.values.json) console.log(JSON.stringify(result, null, 2));
   else {
     console.log(`${result.verdict === "valid" ? "\u2713" : "\u2717"} WORKSPACE ${result.verdict.toUpperCase()} \u2014 ${result.project}`);
@@ -23640,4 +24007,6 @@ async function main() {
 main().catch((error51) => {
   console.error(error51 instanceof Error ? error51.message : String(error51));
   process.exitCode = 3;
+}).finally(() => {
+  void shutdownAnalyzer();
 });
