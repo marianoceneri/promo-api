@@ -22587,7 +22587,7 @@ var applicationEntitySchema = external_exports.object({
   title: external_exports.string().min(1).optional(),
   plural: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
   id_field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
-  storage: external_exports.literal("memory"),
+  storage: external_exports.enum(["memory", "sqlite"]),
   fields: external_exports.array(applicationFieldSchema).min(1)
 }).strict();
 var stateGuardSchema = external_exports.union([
@@ -22664,13 +22664,20 @@ var applicationContractSchema = external_exports.object({
   target: external_exports.object({
     kind: external_exports.literal("go-rest"),
     module: external_exports.string().min(1),
-    port: external_exports.number().int().min(1).max(65535).default(8080)
+    port: external_exports.number().int().min(1).max(65535).default(8080),
+    database: external_exports.object({
+      kind: external_exports.literal("sqlite"),
+      path: external_exports.string().min(1)
+    }).strict().optional()
   }).strict(),
   entities: external_exports.array(applicationEntitySchema).min(1),
   operations: external_exports.array(applicationOperationSchema).min(1),
   policies: external_exports.array(validityPolicySchema).default([]),
   flows: external_exports.array(applicationFlowSchema).min(1)
 }).strict().superRefine((contract, context) => {
+  if (contract.entities.some((entity) => entity.storage === "sqlite") && !contract.target.database) {
+    context.addIssue({ code: "custom", path: ["target", "database"], message: "sqlite entities require target.database" });
+  }
   unique(contract.entities.map((item) => item.name), context, ["entities"], "entity");
   unique(contract.operations.map((item) => item.id), context, ["operations"], "operation");
   unique(contract.policies.map((item) => item.id), context, ["policies"], "policy");
@@ -22919,24 +22926,23 @@ async function readAliases(lordDirectory, artifact) {
 
 // src/application/generator.ts
 function generateGoRestApplication(contract) {
+  const sqlite = contract.entities.some((entity) => entity.storage === "sqlite");
   return {
     contract_id: fingerprint(contract),
     files: {
-      "go.mod": `module ${contract.target.module}
-
-go 1.24.0
-`,
+      "go.mod": renderGoMod(contract),
       "cmd/api/main.go": renderMain(contract),
       "internal/domain/entities.go": renderEntities(contract),
       "internal/store/memory.go": renderStores(contract),
-      "internal/observability/events.go": renderObservability(),
+      ...sqlite ? { "internal/store/sqlite.go": renderSqliteStores(contract) } : {},
+      "internal/observability/events.go": renderObservability(sqlite),
       "internal/httpapi/handler.go": renderHandler(contract),
       "internal/httpapi/handler_test.go": renderHandlerTests(contract)
     }
   };
 }
 function renderHandlerTests(contract) {
-  const stores = contract.entities.map((entity) => `store.New${entity.name}Store()`).join(", ");
+  const stores = contract.entities.map((entity) => entity.storage === "sqlite" ? `store.New${entity.name}Store(store.NewTestDatabase())` : `store.New${entity.name}Store()`).join(", ");
   const tests = contract.entities.flatMap((entity) => {
     const create = contract.operations.find((item) => item.entity === entity.name && item.kind === "create");
     const get = contract.operations.find((item) => item.entity === entity.name && item.kind === "get");
@@ -23237,29 +23243,96 @@ function changedSampleValue(field, current) {
   if (field.type === "datetime") return "2030-02-01T00:00:00Z";
   return `${String(current)}-changed`;
 }
+var SQLITE_MODULE_VERSION = "v1.56.0";
+function renderGoMod(contract) {
+  if (!contract.entities.some((entity) => entity.storage === "sqlite")) {
+    return `module ${contract.target.module}
+
+go 1.24.0
+`;
+  }
+  return `module ${contract.target.module}
+
+go 1.25.0
+
+require modernc.org/sqlite ${SQLITE_MODULE_VERSION}
+
+require (
+	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/google/uuid v1.6.0 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	modernc.org/libc v1.74.4 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
+)
+`;
+}
 function renderMain(contract) {
-  const stores = contract.entities.map((entity) => `${lowerFirst(entity.name)}Store := store.New${entity.name}Store()`).join("\n	");
+  const sqlite = contract.entities.some((entity) => entity.storage === "sqlite");
+  const database = contract.target.database;
+  const wiring = sqlite && database ? `databasePath := os.Getenv("LORD_DATABASE_PATH")
+	if databasePath == "" {
+		databasePath = ${JSON.stringify(database.path)}
+	}
+	db, err := store.OpenDatabase(databasePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	hadRows, err := store.DatabaseHasRows(db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := store.MigrateDatabase(db); err != nil {
+		log.Fatal(err)
+	}
+	` : "";
+  const stores = contract.entities.map((entity) => entity.storage === "sqlite" ? `${lowerFirst(entity.name)}Store := store.New${entity.name}Store(db)` : `${lowerFirst(entity.name)}Store := store.New${entity.name}Store()`).join("\n	");
   const args = contract.entities.map((entity) => `${lowerFirst(entity.name)}Store`).join(", ");
+  const construct = sqlite ? `httpapi.NewHandlerWithHistory(!hadRows, ${args})` : `httpapi.NewHandler(${args})`;
+  const imports = sqlite ? `	"log"
+	"net/http"
+	"os"` : `	"log"
+	"net/http"`;
   return `// Code generated by LORD. DO NOT EDIT.
 package main
 
 import (
-	"log"
-	"net/http"
+${imports}
 
 	"${contract.target.module}/internal/httpapi"
 	"${contract.target.module}/internal/store"
 )
 
 func main() {
-	${stores}
-	handler := httpapi.NewHandler(${args})
+	${wiring}${stores}
+	handler := ${construct}
 	log.Printf("${contract.name} listening on 127.0.0.1:${contract.target.port}")
 	log.Fatal(http.ListenAndServe("127.0.0.1:${contract.target.port}", handler))
 }
 `;
 }
-function renderObservability() {
+function renderObservability(sqlite = false) {
+  const historyField = sqlite ? "\n	historyComplete bool" : "";
+  const constructor = sqlite ? "func NewRecorder() *Recorder { return &Recorder{historyComplete: true} }" : "func NewRecorder() *Recorder { return &Recorder{} }";
+  const historySupport = sqlite ? `
+
+// MarkHistoryIncomplete records that events happened before this process
+// started (persistent state predates the recorder); verifications must not
+// assume a complete history.
+func (r *Recorder) MarkHistoryIncomplete() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.historyComplete = false
+}
+
+func (r *Recorder) HistoryComplete() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.historyComplete
+}` : "";
   return `// Code generated by LORD. DO NOT EDIT.
 package observability
 
@@ -23276,10 +23349,10 @@ type Event struct {
 
 type Recorder struct {
 	mu     sync.RWMutex
-	events []Event
+	events []Event${historyField}
 }
 
-func NewRecorder() *Recorder { return &Recorder{} }
+${constructor}
 
 func (r *Recorder) Record(eventType string, data map[string]any) {
 	r.mu.Lock()
@@ -23293,7 +23366,7 @@ func (r *Recorder) Snapshot() []Event {
 	result := make([]Event, len(r.events))
 	copy(result, r.events)
 	return result
-}
+}${historySupport}
 `;
 }
 function renderEntities(contract) {
@@ -23311,7 +23384,7 @@ ${structs}
 `;
 }
 function renderStores(contract) {
-  const blocks = contract.entities.map((entity) => {
+  const blocks = contract.entities.filter((entity) => entity.storage === "memory").map((entity) => {
     const store = `${entity.name}Store`;
     const id = goName(entity.id_field);
     return `type ${store} struct {
@@ -23356,23 +23429,289 @@ func (s *${store}) List() []domain.${entity.name} {
 	return result
 }`;
   }).join("\n\n");
-  return `// Code generated by LORD. DO NOT EDIT.
-package store
-
-import (
+  const imports = blocks.length > 0 ? `import (
 	"errors"
 	"sort"
 	"sync"
 
 	"${contract.target.module}/internal/domain"
-)
+)` : `import "errors"`;
+  const body = blocks.length > 0 ? `
+
+${blocks}` : "";
+  return `// Code generated by LORD. DO NOT EDIT.
+package store
+
+${imports}
 
 var (
 	ErrNotFound = errors.New("not found")
 	ErrAlreadyExists = errors.New("already exists")
+)${body}
+`;
+}
+function sqlColumnType(type) {
+  if (type === "integer") return "INTEGER";
+  if (type === "boolean") return "INTEGER";
+  return "TEXT";
+}
+function sqlColumnDefault(type) {
+  return type === "integer" || type === "boolean" ? "0" : "''";
+}
+function renderSqliteStores(contract) {
+  const entities = contract.entities.filter((entity) => entity.storage === "sqlite");
+  const usesTime = entities.some((entity) => entity.fields.some((field) => field.type === "datetime"));
+  const migrations = entities.map((entity) => {
+    const table = entity.plural.replace(/-/g, "_");
+    const columns = entity.fields.map((field) => {
+      const constraint = field.name === entity.id_field ? " PRIMARY KEY" : "";
+      return `${field.name} ${sqlColumnType(field.type)} NOT NULL${constraint}`;
+    }).join(", ");
+    const expected = entity.fields.map(
+      (field) => `		{${JSON.stringify(field.name)}, ${JSON.stringify(`${sqlColumnType(field.type)} NOT NULL DEFAULT ${sqlColumnDefault(field.type)}`)}},`
+    ).join("\n");
+    return `	if _, err := db.Exec(${JSON.stringify(`CREATE TABLE IF NOT EXISTS ${table} (${columns})`)}); err != nil {
+		return err
+	}
+	existing, err := tableColumns(db, ${JSON.stringify(table)})
+	if err != nil {
+		return err
+	}
+	expected := []struct{ name, clause string }{
+${expected}
+	}
+	known := map[string]bool{}
+	for _, column := range expected {
+		known[column.name] = true
+		if !existing[column.name] {
+			if _, err := db.Exec("ALTER TABLE ${table} ADD COLUMN " + column.name + " " + column.clause); err != nil {
+				return err
+			}
+		}
+	}
+	for name := range existing {
+		if !known[name] {
+			return fmt.Errorf("table ${table} has column %q outside the active contract; destructive migrations require explicit operator action", name)
+		}
+	}`;
+  }).join("\n\n");
+  const stores = entities.map((entity) => {
+    const table = entity.plural.replace(/-/g, "_");
+    const store = `${entity.name}Store`;
+    const id = goName(entity.id_field);
+    const columnNames = entity.fields.map((field) => field.name).join(", ");
+    const placeholders = entity.fields.map(() => "?").join(", ");
+    const writeArg = (field) => {
+      const name = goName(field.name);
+      if (field.type === "datetime") return `formatStoredTime(value.${name})`;
+      if (field.type === "boolean") return `storedBool(value.${name})`;
+      return `value.${name}`;
+    };
+    const insertArgs = entity.fields.map(writeArg).join(", ");
+    const updateColumns = entity.fields.filter((field) => field.name !== entity.id_field);
+    const updateSet = updateColumns.map((field) => `${field.name} = ?`).join(", ");
+    const updateArgs = [...updateColumns.map(writeArg), `value.${id}`].join(", ");
+    const scanRaw = entity.fields.map((field) => {
+      if (field.type === "datetime") return `	var ${lowerFirst(goName(field.name))}Raw string`;
+      if (field.type === "boolean") return `	var ${lowerFirst(goName(field.name))}Raw int64`;
+      return null;
+    }).filter((line) => line !== null).join("\n");
+    const scanTargets = entity.fields.map((field) => {
+      if (field.type === "datetime" || field.type === "boolean") return `&${lowerFirst(goName(field.name))}Raw`;
+      return `&value.${goName(field.name)}`;
+    }).join(", ");
+    const scanAssign = entity.fields.map((field) => {
+      const name = goName(field.name);
+      if (field.type === "datetime") return `	value.${name} = parseStoredTime(${lowerFirst(name)}Raw)`;
+      if (field.type === "boolean") return `	value.${name} = ${lowerFirst(name)}Raw != 0`;
+      return null;
+    }).filter((line) => line !== null).join("\n");
+    return `type ${store} struct{ db *sql.DB }
+
+func New${store}(db *sql.DB) *${store} { return &${store}{db: db} }
+
+func (s *${store}) Create(value domain.${entity.name}) error {
+	_, err := s.db.Exec(${JSON.stringify(`INSERT INTO ${table} (${columnNames}) VALUES (${placeholders})`)}, ${insertArgs})
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrAlreadyExists
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *${store}) Update(value domain.${entity.name}) error {
+	result, err := s.db.Exec(${JSON.stringify(`UPDATE ${table} SET ${updateSet} WHERE ${entity.id_field} = ?`)}, ${updateArgs})
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *${store}) Get(id string) (domain.${entity.name}, error) {
+	return scan${entity.name}(s.db.QueryRow(${JSON.stringify(`SELECT ${columnNames} FROM ${table} WHERE ${entity.id_field} = ?`)}, id))
+}
+
+func (s *${store}) List() []domain.${entity.name} {
+	result := make([]domain.${entity.name}, 0)
+	rows, err := s.db.Query(${JSON.stringify(`SELECT ${columnNames} FROM ${table} ORDER BY ${entity.id_field}`)})
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+	for rows.Next() {
+		value, err := scan${entity.name}(rows)
+		if err != nil {
+			return result
+		}
+		result = append(result, value)
+	}
+	return result
+}
+
+func scan${entity.name}(row interface{ Scan(dest ...any) error }) (domain.${entity.name}, error) {
+	var value domain.${entity.name}
+${scanRaw}
+	if err := row.Scan(${scanTargets}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.${entity.name}{}, ErrNotFound
+		}
+		return domain.${entity.name}{}, err
+	}
+${scanAssign}
+	return value, nil
+}`;
+  }).join("\n\n");
+  const timeHelpers = usesTime ? `
+
+func formatStoredTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func parseStoredTime(raw string) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}` : "";
+  const boolHelper = entities.some((entity) => entity.fields.some((field) => field.type === "boolean")) ? `
+
+func storedBool(value bool) int64 {
+	if value {
+		return 1
+	}
+	return 0
+}` : "";
+  const tableList = entities.map((entity) => JSON.stringify(entity.plural.replace(/-/g, "_"))).join(", ");
+  const timeImport = usesTime ? `
+	"time"` : "";
+  return `// Code generated by LORD. DO NOT EDIT.
+package store
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"${timeImport}
+
+	_ "modernc.org/sqlite"
+
+	"${contract.target.module}/internal/domain"
 )
 
-${blocks}
+func OpenDatabase(path string) (*sql.DB, error) {
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func NewTestDatabase() *sql.DB {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		panic(err)
+	}
+	db.SetMaxOpenConns(1)
+	if err := MigrateDatabase(db); err != nil {
+		panic(err)
+	}
+	return db
+}
+
+// DatabaseHasRows reports whether any contract-managed table already holds
+// data: a fresh process over pre-existing rows has an incomplete event
+// history and must declare it.
+func DatabaseHasRows(db *sql.DB) (bool, error) {
+	for _, table := range []string{${tableList}} {
+		var populated int64
+		if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM " + table + " LIMIT 1)").Scan(&populated); err != nil {
+			if strings.Contains(err.Error(), "no such table") {
+				continue
+			}
+			return false, err
+		}
+		if populated != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// MigrateDatabase creates missing tables and adds missing columns derived
+// from the active contract. Columns present in the database but absent from
+// the contract abort with an explicit error: destructive migrations require
+// operator action, never an automatic drop.
+func MigrateDatabase(db *sql.DB) error {
+${migrations}
+	return nil
+}
+
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var id int64
+		var name, columnType string
+		var notNull, primaryKey int64
+		var defaultValue any
+		if err := rows.Scan(&id, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, rows.Err()
+}
+
+${stores}${timeHelpers}${boolHelper}
 `;
 }
 function renderHandler(contract) {
@@ -23388,6 +23727,35 @@ function renderHandler(contract) {
   if (contract.operations.some((operation) => operation.kind === "evaluate_validity" || operation.precondition !== void 0 || operation.kind === "list" && operation.parameters.some((parameter) => parameter.type === "datetime"))) standardImports.push("time");
   if (contract.operations.some((operation) => operation.kind === "list" && operation.parameters.some((parameter) => parameter.type === "boolean" || parameter.type === "integer"))) standardImports.push("strconv");
   standardImports.sort();
+  const sqlite = contract.entities.some((entity) => entity.storage === "sqlite");
+  const historyLiteral = sqlite ? "handler.events.HistoryComplete()" : "true";
+  const base = `
+
+func NewHandler(${params}) http.Handler {
+	handler := &Handler{${assignments}, events: observability.NewRecorder()}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, map[string]string{"status": "ok"}) })
+	mux.HandleFunc("GET /_lord/events", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, map[string]any{"history_complete": ${historyLiteral}, "final": true, "events": handler.events.Snapshot()}) })
+${routes}
+	return mux
+}`;
+  const constructors = sqlite ? base.replace("func NewHandler(", "func newHandler(").replace("return mux", "return handler, mux").replace(") http.Handler {", ") (*Handler, http.Handler) {") + `
+
+func NewHandler(${params}) http.Handler {
+	_, mux := newHandler(${contract.entities.map((entity) => `${lowerFirst(entity.name)}s`).join(", ")})
+	return mux
+}
+
+// NewHandlerWithHistory reports whether the event history is complete: a
+// service starting over pre-existing persistent state must declare an
+// incomplete history so runtime verification stays honest.
+func NewHandlerWithHistory(historyComplete bool, ${params}) http.Handler {
+	handler, mux := newHandler(${contract.entities.map((entity) => `${lowerFirst(entity.name)}s`).join(", ")})
+	if !historyComplete {
+		handler.events.MarkHistoryIncomplete()
+	}
+	return mux
+}` : base;
   const imports = standardImports.map((item) => `	"${item}"`).join("\n");
   return `// Code generated by LORD. DO NOT EDIT.
 package httpapi
@@ -23403,16 +23771,7 @@ ${imports}
 type Handler struct {
 ${fields}
 	events *observability.Recorder
-}
-
-func NewHandler(${params}) http.Handler {
-	handler := &Handler{${assignments}, events: observability.NewRecorder()}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, map[string]string{"status": "ok"}) })
-	mux.HandleFunc("GET /_lord/events", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, map[string]any{"history_complete": true, "final": true, "events": handler.events.Snapshot()}) })
-${routes}
-	return mux
-}
+}${constructors}
 
 ${handlers}
 
