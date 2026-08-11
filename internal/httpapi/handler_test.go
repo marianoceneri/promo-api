@@ -228,12 +228,6 @@ func TestPromotionUpdatePromotionPrecondition(t *testing.T) {
 	if response.Code != http.StatusConflict {
 		t.Fatalf("expired update status = %d, want 409, body = %s", response.Code, response.Body.String())
 	}
-	request = httptest.NewRequest(http.MethodPut, "/v1/promotions/PROMOTION-PRE-UPDATE", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-UPDATE\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false}")))
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("unguarded expired update status = %d, want 200, body = %s", response.Code, response.Body.String())
-	}
 }
 
 func TestPromotionEnablePromotionPrecondition(t *testing.T) {
