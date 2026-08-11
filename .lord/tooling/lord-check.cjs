@@ -22590,6 +22590,16 @@ var applicationEntitySchema = external_exports.object({
   storage: external_exports.literal("memory"),
   fields: external_exports.array(applicationFieldSchema).min(1)
 }).strict();
+var stateGuardSchema = external_exports.union([
+  external_exports.object({
+    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    equals: external_exports.union([external_exports.boolean(), external_exports.string().min(1)])
+  }).strict(),
+  external_exports.object({
+    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
+    in: external_exports.array(external_exports.string().min(1)).min(1)
+  }).strict()
+]);
 var applicationParameterSchema = external_exports.object({
   name: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
   in: external_exports.literal("query"),
@@ -22610,17 +22620,15 @@ var applicationOperationSchema = external_exports.object({
   parameters: external_exports.array(applicationParameterSchema).default([]),
   transition: external_exports.object({
     field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
-    from: external_exports.boolean().optional(),
-    to: external_exports.boolean()
+    from: external_exports.union([external_exports.boolean(), external_exports.string().min(1)]).optional(),
+    to: external_exports.union([external_exports.boolean(), external_exports.string().min(1)])
   }).strict().optional(),
-  state_guard: external_exports.object({
-    field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
-    equals: external_exports.boolean()
-  }).strict().optional(),
+  state_guard: stateGuardSchema.optional(),
+  state_guards: external_exports.array(stateGuardSchema).min(1).optional(),
   precondition: external_exports.object({
     when: external_exports.object({
       field: external_exports.string().regex(/^[a-z][a-z0-9_]*$/),
-      equals: external_exports.boolean()
+      equals: external_exports.union([external_exports.boolean(), external_exports.string().min(1)])
     }).strict().optional(),
     requires: external_exports.union([
       external_exports.object({
@@ -22710,28 +22718,56 @@ var applicationContractSchema = external_exports.object({
     if (operation.method !== expectedMethod) context.addIssue({ code: "custom", path: ["operations", index, "method"], message: `${operation.kind} must use ${expectedMethod}` });
     const needsID = ["update", "get", "evaluate_validity", "transition"].includes(operation.kind);
     if (needsID !== operation.path.includes("{id}")) context.addIssue({ code: "custom", path: ["operations", index, "path"], message: needsID ? "operation path must contain {id}" : "operation path must not contain {id}" });
+    const stateLiteralIssue = (fieldName, value) => {
+      const field = fieldDefinitions.get(fieldName);
+      if (!field) return "state fields must reference an entity field";
+      if (field.type === "boolean") return typeof value === "boolean" ? null : "boolean state fields require boolean literals";
+      if (field.type === "string" && field.enum) {
+        return typeof value === "string" && field.enum.includes(value) ? null : "enum state fields require one of their declared values";
+      }
+      return "state fields must be boolean or enumerated string entity fields";
+    };
     if (operation.kind === "transition") {
       if (!operation.transition) context.addIssue({ code: "custom", path: ["operations", index, "transition"], message: "transition operation requires transition semantics" });
-      else if (entity?.fields.find((field) => field.name === operation.transition?.field)?.type !== "boolean") {
-        context.addIssue({ code: "custom", path: ["operations", index, "transition", "field"], message: "transition field must reference a boolean entity field" });
+      else {
+        const toIssue = stateLiteralIssue(operation.transition.field, operation.transition.to);
+        if (toIssue) context.addIssue({ code: "custom", path: ["operations", index, "transition", "to"], message: toIssue });
+        const fromIssue = operation.transition.from === void 0 ? null : stateLiteralIssue(operation.transition.field, operation.transition.from);
+        if (fromIssue) context.addIssue({ code: "custom", path: ["operations", index, "transition", "from"], message: fromIssue });
+        if (operation.transition.from !== void 0 && operation.transition.from === operation.transition.to) {
+          context.addIssue({ code: "custom", path: ["operations", index, "transition"], message: "transition from and to states must differ" });
+        }
       }
     } else if (operation.transition) {
       context.addIssue({ code: "custom", path: ["operations", index, "transition"], message: "transition semantics are valid only for transition operations" });
     }
-    if (operation.state_guard) {
-      if (!needsID) context.addIssue({ code: "custom", path: ["operations", index, "state_guard"], message: "state guards require an entity-instance operation" });
-      if (entity?.fields.find((field) => field.name === operation.state_guard?.field)?.type !== "boolean") {
-        context.addIssue({ code: "custom", path: ["operations", index, "state_guard", "field"], message: "state guard field must reference a boolean entity field" });
+    const allGuards = [
+      ...operation.state_guard ? [{ guard: operation.state_guard, path: ["operations", index, "state_guard"] }] : [],
+      ...(operation.state_guards ?? []).map((guard, guardIndex) => ({ guard, path: ["operations", index, "state_guards", guardIndex] }))
+    ];
+    allGuards.forEach(({ guard, path }) => {
+      if (!needsID) context.addIssue({ code: "custom", path, message: "state guards require an entity-instance operation" });
+      if ("equals" in guard) {
+        const guardIssue = stateLiteralIssue(guard.field, guard.equals);
+        if (guardIssue) context.addIssue({ code: "custom", path: [...path, "field"], message: guardIssue });
+      } else {
+        const field = fieldDefinitions.get(guard.field);
+        if (field?.type !== "string" || !field.enum) {
+          context.addIssue({ code: "custom", path: [...path, "field"], message: "membership guards require an enumerated string entity field" });
+        } else if (!guard.in.every((member) => field.enum.includes(member))) {
+          context.addIssue({ code: "custom", path: [...path, "in"], message: "membership guards accept only declared enum values" });
+        } else if (new Set(guard.in).size !== guard.in.length) {
+          context.addIssue({ code: "custom", path: [...path, "in"], message: "membership guard values must be distinct" });
+        }
       }
-    }
+    });
     if (operation.precondition) {
       if (!["create", "update", "transition"].includes(operation.kind)) {
         context.addIssue({ code: "custom", path: ["operations", index, "precondition"], message: "preconditions apply only to create, update or transition operations" });
       }
       const when = operation.precondition.when;
-      if (when && entity?.fields.find((field) => field.name === when.field)?.type !== "boolean") {
-        context.addIssue({ code: "custom", path: ["operations", index, "precondition", "when", "field"], message: "precondition when.field must reference a boolean entity field" });
-      }
+      const whenIssue = when ? stateLiteralIssue(when.field, when.equals) : null;
+      if (whenIssue) context.addIssue({ code: "custom", path: ["operations", index, "precondition", "when", "field"], message: whenIssue });
       if (entity?.fields.find((field) => field.name === operation.precondition?.requires.field)?.type !== "datetime") {
         context.addIssue({ code: "custom", path: ["operations", index, "precondition", "requires", "field"], message: "precondition requires.field must reference a datetime entity field" });
       }
@@ -22916,14 +22952,21 @@ function renderHandlerTests(contract) {
       '	if response.Code != http.StatusCreated { t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String()) }'
     ];
     if (create.emits) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(create.emits)} { t.Fatal("create did not emit its contractual event") }`);
+    const guardBlocks = (operation) => operation !== void 0 && operationGuards(operation).some((guard) => guardBlocksValue(guard, sample[guard.field]));
     if (get) steps.push(
       `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(get.path.replace("{id}", idValue))}, nil)`,
       "	response = httptest.NewRecorder()",
       "	handler.ServeHTTP(response, request)",
-      '	if response.Code != http.StatusOK { t.Fatalf("get status = %d, body = %s", response.Code, response.Body.String()) }'
+      guardBlocks(get) ? '	if response.Code != http.StatusConflict { t.Fatalf("guarded get status = %d, want 409, body = %s", response.Code, response.Body.String()) }' : '	if response.Code != http.StatusOK { t.Fatalf("get status = %d, body = %s", response.Code, response.Body.String()) }'
     );
-    if (get?.emits) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(get.emits)} { t.Fatal("get did not emit its contractual event") }`);
-    if (validity) steps.push(
+    if (get?.emits && !guardBlocks(get)) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(get.emits)} { t.Fatal("get did not emit its contractual event") }`);
+    if (validity && guardBlocks(validity)) steps.push(
+      `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${validity.path.replace("{id}", idValue)}?at=2030-06-01T00%3A00%3A00Z`)}, nil)`,
+      "	response = httptest.NewRecorder()",
+      "	handler.ServeHTTP(response, request)",
+      '	if response.Code != http.StatusConflict { t.Fatalf("guarded validity status = %d, want 409, body = %s", response.Code, response.Body.String()) }'
+    );
+    if (validity && !guardBlocks(validity)) steps.push(
       `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${validity.path.replace("{id}", idValue)}?at=2030-06-01T00%3A00%3A00Z`)}, nil)`,
       "	response = httptest.NewRecorder()",
       "	handler.ServeHTTP(response, request)",
@@ -22932,16 +22975,21 @@ function renderHandlerTests(contract) {
       "	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil { t.Fatal(err) }",
       '	if !result.Valid { t.Fatal("expected generated fixture to be valid") }'
     );
-    if (validity?.emits) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(validity.emits)} { t.Fatal("validity check did not emit its contractual event") }`);
+    if (validity?.emits && validity && !guardBlocks(validity)) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(validity.emits)} { t.Fatal("validity check did not emit its contractual event") }`);
+    const simulated = { ...sample };
     for (const transition of transitions) {
+      const semantics = transition.transition;
+      const blocked = semantics.from !== void 0 && simulated[semantics.field] !== semantics.from || operationGuards(transition).some((guard) => guardBlocksValue(guard, simulated[guard.field]));
       steps.push(
         `	request = httptest.NewRequest(http.MethodPost, ${JSON.stringify(transition.path.replace("{id}", idValue))}, nil)`,
         "	response = httptest.NewRecorder()",
         "	handler.ServeHTTP(response, request)",
-        `	if response.Code != http.StatusOK { t.Fatalf(${JSON.stringify(`${transition.id} status = %d, body = %s`)}, response.Code, response.Body.String()) }`
+        blocked ? `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`blocked ${transition.id} status = %d, want 409, body = %s`)}, response.Code, response.Body.String()) }` : `	if response.Code != http.StatusOK { t.Fatalf(${JSON.stringify(`${transition.id} status = %d, body = %s`)}, response.Code, response.Body.String()) }`
       );
+      if (blocked) continue;
+      simulated[semantics.field] = semantics.to;
       if (transition.emits) steps.push(`	if response.Header().Get("X-LORD-Event") != ${JSON.stringify(transition.emits)} { t.Fatal(${JSON.stringify(`${transition.id} did not emit its contractual event`)}) }`);
-      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "update" && operation.state_guard && operation.state_guard.field === transition.transition?.field && operation.state_guard.equals !== transition.transition?.to)) {
+      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "update" && operationGuards(operation).some((guard) => guard.field === transition.transition?.field && guardBlocksValue(guard, transition.transition?.to)))) {
         steps.push(
           `	request = httptest.NewRequest(http.MethodPut, ${JSON.stringify(guarded.path.replace("{id}", idValue))}, bytes.NewReader([]byte(${JSON.stringify(JSON.stringify(sample))})))`,
           "	response = httptest.NewRecorder()",
@@ -22949,7 +22997,7 @@ function renderHandlerTests(contract) {
           `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`${guarded.id} after ${transition.id} status = %d, want 409`)}, response.Code) }`
         );
       }
-      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "evaluate_validity" && operation.state_guard && operation.state_guard.field === transition.transition?.field && operation.state_guard.equals !== transition.transition?.to)) {
+      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "evaluate_validity" && operationGuards(operation).some((guard) => guard.field === transition.transition?.field && guardBlocksValue(guard, transition.transition?.to)))) {
         const instant = guarded.parameters.find((parameter) => parameter.type === "datetime" && parameter.required);
         steps.push(
           `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${guarded.path.replace("{id}", idValue)}?${instant.name}=2030-06-01T00%3A00%3A00Z`)}, nil)`,
@@ -22958,7 +23006,7 @@ function renderHandlerTests(contract) {
           `	if response.Code != http.StatusConflict { t.Fatalf(${JSON.stringify(`${guarded.id} after ${transition.id} status = %d, want 409`)}, response.Code) }`
         );
       }
-      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "get" && operation.state_guard && operation.state_guard.field === transition.transition?.field && operation.state_guard.equals !== transition.transition?.to)) {
+      for (const guarded of contract.operations.filter((operation) => operation.entity === entity.name && operation.kind === "get" && operationGuards(operation).some((guard) => guard.field === transition.transition?.field && guardBlocksValue(guard, transition.transition?.to)))) {
         steps.push(
           `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(guarded.path.replace("{id}", idValue))}, nil)`,
           "	response = httptest.NewRecorder()",
@@ -22973,7 +23021,7 @@ function renderHandlerTests(contract) {
             "	response = httptest.NewRecorder()",
             "	handler.ServeHTTP(response, request)",
             `	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), ${JSON.stringify(idValue)}) { t.Fatalf(${JSON.stringify(`${listing.id} matching filter did not return transitioned entity: %s`)}, response.Body.String()) }`,
-            `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${listing.path}?${parameter.name}=${String(!transition.transition?.to)}`)}, nil)`,
+            `	request = httptest.NewRequest(http.MethodGet, ${JSON.stringify(`${listing.path}?${parameter.name}=${String(flippedStateValue(entity, transition.transition.field, transition.transition.to))}`)}, nil)`,
             "	response = httptest.NewRecorder()",
             "	handler.ServeHTTP(response, request)",
             `	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), ${JSON.stringify(idValue)}) { t.Fatalf(${JSON.stringify(`${listing.id} opposite filter returned transitioned entity: %s`)}, response.Body.String()) }`
@@ -23031,13 +23079,20 @@ ${tests}
 var EXPIRED_START = "2000-01-01T00:00:00Z";
 var EXPIRED_END = "2000-02-01T00:00:00Z";
 var FUTURE_END = "2999-01-01T00:00:00Z";
+function flippedStateValue(entity, fieldName, value) {
+  if (typeof value === "boolean") return !value;
+  const field = entity.fields.find((item) => item.name === fieldName);
+  return field?.enum?.find((member) => member !== value) ?? `${value}-other`;
+}
 function preconditionBody(entity, operation, variant, idValue) {
   const precondition = operation.precondition;
   const body = Object.fromEntries(entity.fields.map((field) => [field.name, sampleValue(field)]));
   body[entity.id_field] = idValue;
   body[precondition.requires.field] = variant === "future_matched" ? FUTURE_END : EXPIRED_END;
   if (variant !== "future_matched" && precondition.requires.field === "ends_at" && "starts_at" in body) body["starts_at"] = EXPIRED_START;
-  if (precondition.when) body[precondition.when.field] = variant === "expired_unmatched" ? !precondition.when.equals : precondition.when.equals;
+  if (precondition.when) {
+    body[precondition.when.field] = variant === "expired_unmatched" ? flippedStateValue(entity, precondition.when.field, precondition.when.equals) : precondition.when.equals;
+  }
   return body;
 }
 function renderPreconditionTest(entity, create, operation, stores) {
@@ -23428,11 +23483,11 @@ function renderOperation(contract, operation) {
       if (!operation.transition) throw new Error(`Operation '${operation.id}' has no transition semantics.`);
       const field = goName(operation.transition.field);
       const expected = operation.transition.from === void 0 ? "" : `
-	if value.${field} != ${operation.transition.from} { writeError(w, http.StatusConflict, "transition requires ${operation.transition.field}=${operation.transition.from}"); return }`;
+	if value.${field} != ${goLiteral(operation.transition.from)} { writeError(w, http.StatusConflict, "transition requires ${operation.transition.field}=${String(operation.transition.from)}"); return }`;
       return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
 	value, err := ${receiver}.Get(r.PathValue("id"))
-	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${expected}
-	value.${field} = ${operation.transition.to}${renderPrecondition(operation, "value")}
+	if err != nil { if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "not found"); return }; writeError(w, http.StatusInternalServerError, "could not get ${lowerFirst(entity.name)}"); return }${renderLoadedStateGuard(operation, "value")}${expected}
+	value.${field} = ${goLiteral(operation.transition.to)}${renderPrecondition(operation, "value")}
 	if err := ${receiver}.Update(value); err != nil { writeError(w, http.StatusInternalServerError, "could not transition ${lowerFirst(entity.name)}"); return }${emit}
 	writeJSON(w, http.StatusOK, value)
 }`;
@@ -23457,12 +23512,17 @@ function renderOperation(contract, operation) {
   }
 }
 function renderGovernedUpdateOperation(operation, entity, receiver, functionName, id, emit) {
-  const guard = operation.state_guard ? `
-	if current.${goName(operation.state_guard.field)} != ${operation.state_guard.equals} { writeError(w, http.StatusConflict, "operation requires ${operation.state_guard.field}=${operation.state_guard.equals}"); return }` : "\n	_ = current";
+  const guards = operationGuards(operation).map((item) => `
+	if ${guardFailureExpr(item, "current")} { writeError(w, http.StatusConflict, "${guardMessage(item)}"); return }`).join("");
+  const guard = guards || "\n	_ = current";
   const immutableChecks = entity.fields.filter((field) => field.immutable && field.name !== entity.id_field).map((field) => {
     const name = goName(field.name);
+    const keepCurrent = field.type === "string" ? `
+	if value.${name} == "" { value.${name} = current.${name} }` : field.type === "integer" ? `
+	if value.${name} == 0 { value.${name} = current.${name} }` : field.type === "datetime" ? `
+	if value.${name}.IsZero() { value.${name} = current.${name} }` : "";
     const changed = field.type === "datetime" ? `!current.${name}.Equal(value.${name})` : `current.${name} != value.${name}`;
-    return `
+    return `${keepCurrent}
 	if ${changed} { writeError(w, http.StatusConflict, "${field.name} is immutable"); return }`;
   }).join("");
   return `func (h *Handler) ${functionName}(w http.ResponseWriter, r *http.Request) {
@@ -23541,7 +23601,7 @@ function renderPrecondition(operation, valueVariable) {
   if (!precondition.when) return `
 	${check3}`;
   return `
-	if ${valueVariable}.${goName(precondition.when.field)} == ${precondition.when.equals} {
+	if ${valueVariable}.${goName(precondition.when.field)} == ${goLiteral(precondition.when.equals)} {
 		${check3}
 	}`;
 }
@@ -23551,10 +23611,25 @@ function preconditionMessage(operation) {
   const comparison = "after" in precondition.requires ? "after" : "at or after";
   return `${scope} ${precondition.requires.field} ${comparison} the request time`;
 }
+function operationGuards(operation) {
+  return [...operation.state_guard ? [operation.state_guard] : [], ...operation.state_guards ?? []];
+}
+function guardFailureExpr(guard, valueVariable) {
+  const name = goName(guard.field);
+  if ("equals" in guard) return `${valueVariable}.${name} != ${goLiteral(guard.equals)}`;
+  return guard.in.map((member) => `${valueVariable}.${name} != ${JSON.stringify(member)}`).join(" && ");
+}
+function guardMessage(guard) {
+  if ("equals" in guard) return `operation requires ${guard.field}=${String(guard.equals)}`;
+  return `operation requires ${guard.field} in [${guard.in.join(" ")}]`;
+}
+function guardBlocksValue(guard, value) {
+  if ("equals" in guard) return value !== guard.equals;
+  return typeof value === "string" ? !guard.in.includes(value) : true;
+}
 function renderLoadedStateGuard(operation, valueVariable) {
-  if (!operation.state_guard) return "";
-  return `
-	if ${valueVariable}.${goName(operation.state_guard.field)} != ${operation.state_guard.equals} { writeError(w, http.StatusConflict, "operation requires ${operation.state_guard.field}=${operation.state_guard.equals}"); return }`;
+  return operationGuards(operation).map((guard) => `
+	if ${guardFailureExpr(guard, valueVariable)} { writeError(w, http.StatusConflict, "${guardMessage(guard)}"); return }`).join("");
 }
 function renderEmit(operation, valueVariable) {
   if (!operation.emits) return "";
@@ -23595,6 +23670,9 @@ function renderChecks(field) {
   if (field.maximum !== void 0) checks.push(`	if value.${name} > ${field.maximum} { return fmt.Errorf("${field.name} must be at most ${field.maximum}") }`);
   if (field.enum) checks.push(`	if !map[string]bool{${field.enum.map((value) => `${JSON.stringify(value)}: true`).join(", ")}}[value.${name}] { return errors.New("${field.name} has an unsupported value") }`);
   return checks;
+}
+function goLiteral(value) {
+  return typeof value === "boolean" ? String(value) : JSON.stringify(value);
 }
 function goName(value) {
   return value.split("_").map((part) => part.length === 0 ? "" : part[0].toUpperCase() + part.slice(1)).join("");
