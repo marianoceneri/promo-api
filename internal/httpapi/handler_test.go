@@ -8,10 +8,15 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/marianoceneri/promo-api/internal/compute"
 	"github.com/marianoceneri/promo-api/internal/store"
 )
+
+func init() {
+	lordNow = func() time.Time { return time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC) }
+}
 
 func newTestHandler() http.Handler {
 	db := store.NewTestDatabase()
@@ -199,7 +204,7 @@ func TestPromotionEnabledIsImmutable(t *testing.T) {
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
-		t.Fatalf("immutable update status = %d, want 409", response.Code)
+		t.Fatalf("immutable update status = %d, want %d", response.Code, http.StatusConflict)
 	}
 }
 
@@ -215,7 +220,7 @@ func TestPromotionStatusIsImmutable(t *testing.T) {
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
-		t.Fatalf("immutable update status = %d, want 409", response.Code)
+		t.Fatalf("immutable update status = %d, want %d", response.Code, http.StatusConflict)
 	}
 }
 
@@ -260,6 +265,7 @@ func TestPromotionUpdatePromotionPrecondition(t *testing.T) {
 
 func TestPromotionEnablePromotionPrecondition(t *testing.T) {
 	handler := newTestHandler()
+
 	request := httptest.NewRequest(http.MethodPost, "/v1/promotions", bytes.NewReader([]byte("{\"id\":\"PROMOTION-PRE-TRANSITION\",\"name\":\"name-test\",\"starts_at\":\"2000-01-01T00:00:00Z\",\"ends_at\":\"2000-02-01T00:00:00Z\",\"installments\":1,\"discount_percent\":1,\"enabled\":false,\"status\":\"draft\"}")))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

@@ -17,6 +17,9 @@ import (
 	"github.com/marianoceneri/promo-api/internal/store"
 )
 
+// lordNow is the generated clock boundary. Tests replace it with a fixed instant.
+var lordNow = func() time.Time { return time.Now().UTC() }
+
 type Handler struct {
 	promotions *store.PromotionStore
 	coupons    *store.CouponStore
@@ -77,7 +80,7 @@ func (h *Handler) createPromotion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if value.Enabled == true {
-		if value.EndsAt.Before(time.Now().UTC()) {
+		if value.EndsAt.Before(lordNow()) {
 			writeError(w, http.StatusConflict, "enabled=true requires ends_at at or after the request time")
 			return
 		}
@@ -143,7 +146,7 @@ func (h *Handler) updatePromotion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if value.Enabled == true {
-		if value.EndsAt.Before(time.Now().UTC()) {
+		if value.EndsAt.Before(lordNow()) {
 			writeError(w, http.StatusConflict, "enabled=true requires ends_at at or after the request time")
 			return
 		}
@@ -253,7 +256,7 @@ func (h *Handler) enablePromotion(w http.ResponseWriter, r *http.Request) {
 	}
 	value.Enabled = true
 	// EnablePromotion always leaves enabled=true, so the clause always applies.
-	if value.EndsAt.Before(time.Now().UTC()) {
+	if value.EndsAt.Before(lordNow()) {
 		writeError(w, http.StatusConflict, "enabled=true requires ends_at at or after the request time")
 		return
 	}
@@ -436,7 +439,7 @@ func (h *Handler) redeemCoupon(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "promotion_id references a promotion that does not exist")
 		return
 	}
-	now := time.Now().UTC()
+	now := lordNow()
 	if now.Before(policyViaPromotionId.StartsAt) || !now.Before(policyViaPromotionId.EndsAt) || !policyViaPromotionId.Enabled {
 		writeError(w, http.StatusConflict, "RedeemCoupon requires the promotion referenced by promotion_id to satisfy PromotionValidity")
 		return
